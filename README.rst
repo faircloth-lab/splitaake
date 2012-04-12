@@ -15,7 +15,7 @@ Design
 
 I'm still testing additional ways of demultiplexing data in parallel.  Hopefully more on this front soon...
 
-Dependencia
+Dependencies
 =============
 
 * seqtools_ ("working" branch)
