@@ -1,3 +1,15 @@
+Purpose
+========
+
+`splitaake` is a reasonably easy method for demultiplexing Illumina reads using either Hamming distance or Levenshtein (edit) distance sequence tags.  A the moment, Hamming distance is the default, which is similar to the approach Illumina uses in their own software.  `splitaake` differs from the Illumina software in that it can demultiplex sequence tags of many lengths, rather than just the "standard" TruSeq index length of 6 nucleotides.
+
+Design
+=======
+
+`splitaake` is currently designed as a single-core application meaning that it does not parallelize the process of demultiplexing.  After a number of tests, I've found that for most files, a single core approach is reasonably fast (and sometimes faster) than multi-core options, particularly when you wish to work with `gzipped` fastq files.
+
+I'm still testing additional ways of demultiplexing data in parallel.  Hopefully more on this front soon...
+
 Running
 ========
 
