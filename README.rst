@@ -53,5 +53,5 @@ Running
 	TruSeq3.fastq.gz
 	...
 
-.. jellyfish: https://github.com/sunlightlabs/jellyfish
-.. seqtools: https://github.com/faircloth-lab/seqtools
+.. _jellyfish: https://github.com/sunlightlabs/jellyfish
+.. _seqtools: https://github.com/faircloth-lab/seqtools
