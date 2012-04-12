@@ -18,7 +18,10 @@ I'm still testing additional ways of demultiplexing data in parallel.  Hopefully
 Dependencies
 =============
 
-* seqtools_ ("working" branch)
+* seqtools_ ("working" branch)::
+
+    pip install git+git://github.com/faircloth-lab/seqtools.git@working
+    
 * jellyfish_ (at the moment - quite fast Hamming implementation)
 
 Running
