@@ -1,3 +1,31 @@
+Purpose
+========
+
+`splitaake` is a reasonably easy method for demultiplexing Illumina reads using either Hamming distance or Levenshtein (edit) distance sequence tags.  A the moment, Hamming distance is the default, which is similar to the approach Illumina uses in their own software.  `splitaake` differs from the Illumina software in that it can demultiplex sequence tags of many lengths, rather than just the "standard" TruSeq index length of 6 nucleotides.
+
+Notes
+======
+
+`splitaake` is under development.  This means that it may break, be a pain to get running, etc.  I'll improve as I have time.  Please feel free to suggest contributions/changes/additions.
+
+Design
+=======
+
+`splitaake` is currently designed as a single-core application meaning that it does not parallelize the process of demultiplexing.  After a number of tests, I've found that for most files, a single core approach is reasonably fast (and sometimes faster) than multi-core options, particularly when you wish to work with `gzipped` fastq files.
+
+I'm still testing additional ways of demultiplexing data in parallel.  Hopefully more on this front soon...
+
+Dependencies
+=============
+
+- seqtools_ ("working" branch)::
+
+    pip install git+git://github.com/faircloth-lab/seqtools.git@working
+
+- jellyfish_ (at the moment - quite fast Hamming implementation)::
+
+    pip install git+git://github.com/sunlightlabs/jellyfish
+
 Running
 ========
 
@@ -30,3 +58,5 @@ Running
 	TruSeq3.fastq.gz
 	...
 
+.. _jellyfish: https://github.com/sunlightlabs/jellyfish
+.. _seqtools: https://github.com/faircloth-lab/seqtools
