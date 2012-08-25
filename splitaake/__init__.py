@@ -16,7 +16,7 @@ if sys.version_info < (2, 7):
 
 try: # pragma: no cover
     import numpy
-    assert numpy.version.version > '1.3', "Demuxipy requires >= numpy 1.3"
+    assert numpy.version.version > '1.3', "splitaake requires >= numpy 1.3"
 except ImportError: # pragma: no cover
     raise ImportError, 'NumPy does not seem to be installed. Please see the user guide.' # pragma: no cover
 
@@ -32,4 +32,4 @@ from db import *
 from lib import *
 from pairwise2 import *
 from core import *
-from tests import test
+#from core.tests import test

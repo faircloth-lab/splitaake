@@ -32,9 +32,9 @@ import itertools
 from seqtools.sequence.transform import DNA_reverse_complement
 
 #from demuxipy import db
-from demuxipy import pairwise2
+from splitaake import pairwise2
 
-from demuxipy.lib import FullPaths, ListQueue, Tagged, Parameters
+from splitaake.lib import FullPaths, ListQueue, Tagged, Parameters
 
 import pdb
 
