@@ -7,7 +7,7 @@ from setuptools.extension import Extension
 
 if __name__ == '__main__':
     setup(
-        name='demuxipy',
+        name='splitaake',
         version="1.0",
         description="Demultiplex hierarchically sequence-tagged massively"
             +"parallel sequencing reads",
