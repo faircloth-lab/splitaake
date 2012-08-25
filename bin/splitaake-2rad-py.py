@@ -26,17 +26,16 @@ import time
 #import itertools
 import ConfigParser
 
-from jellyfish import levenshtein_distance as levenshtein
 from itertools import islice
+from jellyfish import levenshtein_distance as levenshtein
 from multiprocessing import Process, Queue, JoinableQueue, cpu_count
 
 from seqtools.sequence.fastq import FastqReader
 from seqtools.sequence.fasta import FastaQualityReader
 from seqtools.sequence.transform import DNA_reverse_complement
 
-from demuxipy.core import *
-from demuxipy import pe_db as db
-#from demuxipy import pairwise2
+from splitaake.core import *
+from splitaake import pe_db as db
 
 
 class Tag:
