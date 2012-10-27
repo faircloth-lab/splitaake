@@ -62,7 +62,7 @@ def create_db_and_new_tables(db_name):
     return conn, cur
 
 
-def insert_record_to_db(cur, tags):
+def insert_record_to_db(cur, dmux):
     cur.execute('''INSERT INTO tags (
             name,
             f,
@@ -83,14 +83,14 @@ def insert_record_to_db(cur, tags):
         )
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (
-            tags.name,
-            tags.f.name,
-            tags.f.seq,
-            tags.f.match,
-            tags.f.match_type,
-            tags.r.name,
-            tags.r.seq,
-            tags.r.match,
+            dmux.name,
+            dmux.r1tag.name,
+            dmux.r1tag.seq,
+            dmux.r1tag.tag,
+            dmux.r1tag.match_type,
+            dmux.r2tag.name,
+            dmux.r2tag.seq,
+            dmux.r2tag.tag,
             tags.r.match_type,
             tags.fprimer.seq,
             tags.fprimer.match,

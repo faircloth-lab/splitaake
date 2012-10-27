@@ -34,7 +34,7 @@ from seqtools.sequence.transform import DNA_reverse_complement
 #from demuxipy import db
 from splitaake import pairwise2
 
-from splitaake.lib import FullPaths, ListQueue, Tagged, Parameters
+from splitaake.lib2 import FullPaths, ListQueue, Tagged, Parameters
 
 import pdb
 
@@ -60,19 +60,39 @@ def motd():
     print motd
 
 
-def matches(tag, seq_match_span, tag_match_span, allowed_errors):
+class AlignScore:
+    def __init__(self, allowed_errors):
+        self.tag = None
+        self.seq = None
+        self.score = 0
+        self.start = None
+        self.end = None
+        self.matches = 0
+        self.errors = None
+        self.allowed_errors = allowed_errors
+
+    def set(self, tag, seq_match, seq_span, score, start, end, match, errors):
+        self.tag = tag
+        self.seq_match = seq_match
+        self.seq_span = seq_span
+        self.score = score
+        self.start = start
+        self.end = end
+        self.matches = match
+        self.errors = errors
+
+
+def matches(tag, seq_span, tag_span, allowed_errors):
     """Determine the gap/error counts for a particular match"""
-    # deal with case where tag match might be perfect, but extremely gappy, 
+    # deal with case where tag match might be perfect, but extremely gappy,
     # e.g. ACGTCGTGCGGA-------------------------ATC
-    if tag_match_span.count('-') > allowed_errors or \
-        seq_match_span.count('-') > allowed_errors:
-        return 0, 0
+    if tag_span.count('-') > allowed_errors or seq_span.count('-') > allowed_errors:
+        return 0, 100
     else:
-        seq_array   = numpy.array(list(seq_match_span))
-        tag_array   = numpy.array(list(tag_match_span))
-        matches     = sum(seq_array == tag_array)
-        error       = sum(seq_array != tag_array) + (len(tag) - \
-            len(tag_match_span.replace('-','')))
+        seq_array = numpy.array(list(seq_span))
+        tag_array = numpy.array(list(tag_span))
+        matches = sum(seq_array == tag_array)
+        error = sum(seq_array != tag_array) + (tag.tag_len - len(tag_span.replace('-', '')))
         return matches, error
 
 
@@ -80,33 +100,49 @@ def align(seq, tags, allowed_errors):
     """Alignment method for aligning tags with their respective
     sequences.  Only called when regular expression matching patterns fail.
     Inspired by http://github.com/chapmanb/bcbb/tree/master"""
-    high_score = {'tag':None, 'seq_match':None, 'mid_match':None, 'score':None, 
-        'start':None, 'end':None, 'matches':None, 'errors':allowed_errors}
+    score = AlignScore(allowed_errors)
     for tag in tags:
-        #pdb.set_trace()
         try:
-            seq_match, tag_match, score, start, end = pairwise2.align.localms(seq, 
-            tag, 5.0, -4.0, -9.0, -0.5, one_alignment_only=True)[0]
-            seq_match_span  = seq_match[start:end]
-            tag_match_span  = tag_match[start:end]
-            match, errors   = matches(tag, seq_match_span, tag_match_span, allowed_errors)
-            if match >= len(tag)-allowed_errors and match > high_score['matches'] \
-                and errors <= high_score['errors']:
-                high_score['tag'] = tag
-                high_score['seq_match'] = seq_match
-                high_score['tag_match'] = tag_match
-                high_score['score'] = score
-                high_score['start'] = start
-                high_score['end'] = end
-                high_score['matches'] = match
-                high_score['seq_match_span'] = seq_match_span
-                high_score['errors'] = errors
+            seq_match, tag_match, aln_score, start, end = pairwise2.align.localms(
+                    seq,
+                    tag.string,
+                    5.0,
+                    -4.0,
+                    -9.0,
+                    -0.5,
+                    one_alignment_only=True
+                )[0]
+            try:
+                start = max([k for k, v in enumerate(tag_match) if v.islower()]) + 1
+            except ValueError, e:
+                if e.message == 'max() arg is an empty sequence':
+                    start = 0
+                else:
+                    raise ValueError(e)
+            if start is None:
+                start = 0
+            end = start + tag.tag_len
+            seq_span = seq_match[start:end]
+            tag_span = tag_match[start:end]
+            match, errors = matches(tag, seq_span, tag_span, allowed_errors)
+            if start > 0:
+                for pos, base in enumerate(tag_match[:start]):
+                    if seq_match[pos] == base or seq_match[pos] == '-':
+                        start_ok = True
+                    else:
+                        start_ok = False
+            else:
+                start_ok = True
+            #print "{}\t\t{}, matches = {}, errors = {}, good = {}".format(seq_match, seq_span, match, errors, start_ok)
+            #print "{}\t\t{}".format(tag_match, tag_span)
+            if start_ok and match >= (tag.tag_len - allowed_errors) and (match > score.matches) and (errors <= score.allowed_errors):
+                score.set(tag, seq_match, seq_span, score, start, end, match, errors)
+                #print "score set"
+                #pdb.set_trace()
         except IndexError:
             pass
-    if high_score['matches']:
-        return high_score['tag'], high_score['matches'], \
-        high_score['seq_match'], high_score['seq_match_span'], \
-        high_score['start'], high_score['end']
+    if score.matches is not 0:
+        return score
     else:
         return None
 
@@ -120,67 +156,67 @@ def get_align_match_position(seq_match_span, start, stop):
     return start, stop
 
 
-def find_left_tag(s, tag_regexes, tag_strings, max_gap_char, tag_len, fuzzy, errors):
+def find_tag(seq, tags, read, match_type, result):
     """Matching methods for left linker - regex first, followed by fuzzy (SW)
     alignment, if the option is passed"""
-    for regex in tag_regexes:
-        match = regex.search(s)
-        if match is not None:
-            m_type = 'regex'
-            start, stop = match.start(), match.end()
-            # by default, this is true
-            tag_matched = regex.pattern.split('}')[1]
-            seq_matched = s[start:stop]
-            break
-    if match is None and fuzzy:
-        match = align(s[:max_gap_char + tag_len], tag_strings, errors)
-        # we can trim w/o regex
+    #result = SeqSearchResult('tag')
+    if read == 'r1':
+        tag_group = tags.r1
+    elif read == 'r2':
+        tag_group = tags.r2
+    if match_type == 'regex':
+        for tag in tag_group:
+            match = tag.regex.search(seq)
+            if match is not None:
+                result.match = True
+                # by default, this is true
+                assert match.groups()[0] == tag.tag
+                result.match_type = 'regex'
+                result.start, result.end = match.start(), match.end()
+                result.tag = tag.string
+                result.seq = seq[result.start:result.end]
+                result.name = tags.name_lookup(result.tag)
+                break
+    elif match_type == 'fuzzy':
+        match = align(seq[:tags.max_tag_length], tag_group, tags.errors)
         if match:
-            m_type = 'fuzzy'
-            tag_matched = match[0]
-            seq_matched = match[3]
-            start, stop = get_align_match_position(match[3], match[4], match[5])
-    if match:
-        return tag_matched, m_type, start, stop, seq_matched
-    else:
-        return None
+            result.match = True
+            result.match_type = 'fuzzy'
+            result.tag = match.tag.string
+            result.seq = match.seq_span
+            result.name = tags.name_lookup(result.tag)
+            result.start, result.end = get_align_match_position(match.seq_span, match.start, match.end)
+    return result
 
 
-def find_right_tag(s, tag_regexes, tag_strings, max_gap_char, tag_len,
-        fuzzy, errors, tagged, revcomp = True):
-    """Matching methods for right linker - regex first, followed by fuzzy (SW)
-    alignment, if the option is passed"""
-    #if 'MID15_NoError_SimpleX1_NoError_F_NEQ_R' in tagged.read.identifier:
-    #    pdb.set_trace()
-    for regex in tag_regexes:
-        match = regex.search(s)
+def find_site(seq, sites, read, result):
+    if read == 'r1':
+        site_group = sites.r1
+    elif read == 'r2':
+        site_group = sites.r2
+    for site in site_group:
+        match = site.regex.search(seq)
         if match is not None:
-            m_type = 'regex'
-            start, stop = match.start(), match.end()
+            result.match = True
             # by default, this is true
-            tag_matched = regex.pattern.split('[')[0]
-            seq_matched = s[start:stop]
+            assert match.groups()[0] == site.string
+            result.match_type = 'regex'
+            result.start, result.end = match.start(), match.end()
+            result.tag = site.string
+            result.seq = seq[result.start:result.end]
             break
-    if match is None and fuzzy:
-        match = align(s[-(tag_len + max_gap_char):], tag_strings, errors)
-        # we can trim w/o regex
+    if match is None and sites.fuzzy:
+        match = align(seq[:sites.max_site_length], site_group, sites.errors)
         if match:
-            # correct match_position
-            start_of_slice = len(s) - (tag_len + max_gap_char)
-            m_type = 'fuzzy'
-            tag_matched = match[0]
-            seq_matched = match[3]
-            start, stop = get_align_match_position(match[3], match[4], match[5])
-            start, stop = start + start_of_slice, stop + start_of_slice
-    if match and revcomp:
-        return DNA_reverse_complement(tag_matched), m_type, start, stop, DNA_reverse_complement(seq_matched)
-    elif match and not revcomp:
-        return tag_matched, m_type, start, stop, seq_matched
-    else:
-        return None
+            result.match = True
+            result.match_type = 'fuzzy'
+            result.tag = match.tag.string
+            result.seq = match.seq_span
+            result.start, result.end = get_align_match_position(match.seq_span, match.start, match.end)
+    return result
 
 
-def trim_one(tagged, regexes, strings, buff, length, fuzzy, errors, trim = 0):
+def trim_one(tagged, regexes, strings, buff, length, fuzzy, errors, trim=0):
     """Remove the MID tag from the sequence read"""
     #if sequence.id == 'MID_No_Error_ATACGACGTA':
     #    pdb.set_trace()
@@ -308,7 +344,7 @@ def progress(count, interval, big_interval):
 
 def get_args():
     """get arguments (config file location)"""
-    parser = argparse.ArgumentParser(description = "demuxi.py:  sequence " + \
+    parser = argparse.ArgumentParser(description = "splitaake.py:  sequence " + \
         "demultiplexing for hierarchically-tagged samples")
     parser.add_argument('config', help="The input configuration file",
             action=FullPaths)

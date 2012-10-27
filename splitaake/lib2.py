@@ -41,153 +41,236 @@ class ListQueue(list):
         return self.pop()
 
 
+class ConfParallelism:
+    def __init__(self, conf):
+        self.multiprocessing = None
+        self.cores = None
+        self._get_mp_values(conf)
+
+    def _get_mp_values(self, conf):
+        self.multiprocessing = conf.getboolean('Multiprocessing', 'multiprocessing')
+        if self.multiprocessing:
+            cores = conf.get('Multiprocessing', 'cores')
+            if cores.isdigit() and int(cores) <= cpu_count():
+                self.cores = int(cores)
+            elif cores == 'auto':
+                self.cores = cpu_count() - 1
+            else:
+                raise ValueError("[Multiprocessing] CORES must be an integer or 'auto'")
+        else:
+            self.cores = 1
+
+
+class ConfDb:
+    def __init__(self, conf):
+        self.create = None
+        self.name = None
+        self._get_db_values(conf)
+
+    def _get_db_values(self, conf):
+        self.create = conf.getboolean('Database', 'database')
+        if self.create:
+            name = conf.get('Database', 'name').strip("'")
+            if name == '':
+                raise ValueError("[Database] NAME must be specified")
+            else:
+                self.name = os.path.abspath(os.path.expanduser(name))
+
+
+class ConfReads:
+    def __init__(self, conf):
+        self.r1 = None
+        self.r2 = None
+        self._get_r1_and_r2(conf)
+
+    def _get_r1_and_r2(self, conf):
+        for pos, file in enumerate([conf.get('Sequence', 'r1'), conf.get('Sequence', 'r2')]):
+            self._check_and_get_path(pos, file)
+
+    def _check_and_get_path(self, pos, file):
+        fullpath = os.path.abspath(os.path.expanduser(file.strip("'")))
+        try:
+            assert os.path.isfile(fullpath)
+        except:
+            raise IOError("File {0} does not exist".format(file))
+        if pos == 0:
+            self.r1 = fullpath
+        else:
+            self.r2 = fullpath
+
+
+class ConfQuality:
+    def __init__(self, conf):
+        self.trim = None
+        self.min = None
+        self.drop_n = None
+        self._get_quality_values(conf)
+
+    def _get_quality_values(self, conf):
+        self.trim = conf.getboolean('QualitySetup', 'trim')
+        self.dropn = conf.getboolean('QualitySetup', 'dropn')
+        self.min = conf.getint('QualitySetup', 'min')
+
+
+class ConfTag:
+    def __init__(self, conf):
+        self.type = None
+        self.five_p_buffer = None
+        self.three_p_buffer = None
+        self.three_p_orient = None
+        self.fuzzy = None
+        self.errors = None
+        self._get_tag_values(conf)
+        self._get_combinations(conf)
+        self._get_sequences(conf)
+        self._get_reverse_sequences()
+        self._get_r1_tags()
+        self._get_r2_tags()
+
+    def _get_tag_values(self, conf):
+        self.fuzzy = conf.getboolean('TagSetup', 'FuzzyMatching')
+        if self.fuzzy:
+            self.errors = conf.getint('TagSetup', 'AllowedErrors')
+        else:
+            self.errors = 0
+        self.three_p_orient = conf.get('TagSetup', 'ThreePrimeOrientation').lower()
+        try:
+            assert self.three_p_orient in ['forward', 'reverse']
+        except:
+            raise ValueError("[TagSetup] ThreePrimeOrientation must be 'Forward' or 'Reverse'")
+
+    def _get_combinations(self, conf):
+        self.name_d = dict(conf.items('Combinations'))
+
+    def _get_sequences(self, conf):
+        self.seq_d = dict(conf.items('TagSequences'))
+        self.max_tag_length = max([len(v) for k, v in self.seq_d.iteritems()])
+
+    def _get_reverse_sequences(self):
+        self.rev_seq_d = {v: k for k, v in self.seq_d.iteritems()}
+
+    def _get_r1_tags(self):
+        # make sure we reduce set to only uniques
+        r1_tag_names = set([k.split(',')[0] for k in self.name_d.keys()])
+        r1_tag_d = {k: v for k, v in self.seq_d.iteritems() if k in r1_tag_names}
+        self.r1 = [TagMeta(k, v, 'TagSetup') for k, v in r1_tag_d.iteritems()]
+
+    def _get_r2_tags(self):
+        # make sure we reduce set to only uniques
+        r2_tag_names = set([k.split(',')[1] for k in self.name_d.keys()])
+        r2_tag_d = {k: v for k, v in self.seq_d.iteritems() if k in r2_tag_names}
+        self.r2 = [TagMeta(k, v, 'TagSetup') for k, v in r2_tag_d.iteritems()]
+
+    def name_lookup(self, tag):
+        return self.rev_seq_d[tag]
+
+    def combo_lookup(self, r1tag, r2tag):
+        return self.name_d["{0},{1}".format(r1tag, r2tag)]
+
+
+class TagMeta:
+    def __init__(self, name, string, section):
+        nucleotides = set(list('ACGTacgt'))
+        for base in string:
+            assert base in nucleotides, ValueError("[{0}] Foward/Reverse bases must be in the alphabet [ACGTacgt]".format(section))
+        self.name = name
+        self.string = string
+        self._get_tag_parts()
+        self.string_len = len(self.string)
+        self.tag_len = len(self.tag)
+        wild_five = ''.join(['{}*'.format(i) for i in self.five_p])
+        wild_three = ''.join(['{}*'.format(i) for i in self.three_p])
+        self.regex = re.compile('^{0}({1}){2}'.format(wild_five, self.tag, wild_three), re.IGNORECASE)
+        if self.five_p != '':
+            self.five_p_start = re.compile('^{0}+'.format('*'.join(list(self.five_p)), re.IGNORECASE))
+        else:
+            self.five_p_start = None
+
+    def _get_tag_parts(self):
+        regex = re.compile('^([acgt]*)([ACGT]+)([acgt]*)$')
+        result = regex.search(self.string)
+        try:
+            self.five_p, self.tag, self.three_p = result.groups()
+        except:
+            pdb.set_trace()
+
+
+class ConfSite:
+    """get site parameters"""
+    def __init__(self, conf):
+        self.r1 = None
+        self.r2 = None
+        self.fuzzy = None
+        self.errors = None
+        self.iupac = {
+            'R': ('A', 'G'),
+            'Y': ('C', 'T'),
+            'S': ('G', 'C'),
+            'W': ('A', 'T'),
+            'K': ('G', 'T'),
+            'M': ('A', 'C'),
+            'B': ('C', 'G', 'T'),
+            'D': ('A', 'G', 'T'),
+            'H': ('A', 'C', 'T'),
+            'V': ('A', 'C', 'G'),
+        }
+        self._get_tag_values(conf)
+        self._get_sequences(conf)
+        self._get_forward(conf)
+        self._get_reverse(conf)
+
+    def _get_tag_values(self, conf):
+        self.fuzzy = conf.getboolean('SiteSetup', 'FuzzyMatching')
+        if self.fuzzy:
+            self.errors = conf.getint('SiteSetup', 'AllowedErrors')
+        else:
+            self.errors = 0
+
+    def _get_sequences(self, conf):
+        self.max_site_length = max([len(site) for site in [conf.get('SiteSetup', 'forward'), conf.get('SiteSetup', 'reverse')]])
+
+    def _get_forward(self, conf):
+        forward = conf.get('SiteSetup', 'forward')
+        forwards = self._convert_degenerate_primers(forward)
+        #pdb.set_trace()
+        self.r1 = [TagMeta('r1site', s, 'SiteSetup') for s in forwards]
+
+    def _get_reverse(self, conf):
+        reverse = conf.get('SiteSetup', 'reverse')
+        reverses = self._convert_degenerate_primers(reverse)
+        self.r2 = [TagMeta('r2site', s, 'SiteSetup') for s in reverses]
+
+    def _convert_degenerate_primers(self, sites, lst=False):
+        """Convert a given degenerate primer sequence to standard IUPAC nuclteotides"""
+        if not lst:
+            sites = [sites]
+        new_sites = []
+        still_degen = False
+        for site in sites:
+            for degen, bases in self.iupac.iteritems():
+                if degen in site:
+                    still_degen = True
+                    for base in bases:
+                        new_sites.append(site.replace(degen, base))
+            if not still_degen:
+                new_sites.append(site)
+        #pdb.set_trace()
+        if still_degen:
+            new_sites = self._convert_degenerate_primers(new_sites, lst=True)
+        new_sites = list(set(new_sites))
+        #pdb.set_trace()
+        return new_sites
+
+
 class Parameters:
     '''linkers.py run parameters'''
     def __init__(self, conf):
-        self.conf = conf
-        try:
-            self.fasta = os.path.abspath(os.path.expanduser(
-                    self.conf.get('Sequence', 'fasta').strip("'")))
-            self.quality = os.path.abspath(os.path.expanduser( \
-                    self.conf.get('Sequence', 'quality').strip("'")))
-            self.fastq, self.r1, self.r2 = False, False, False, False
-        #pdb.set_trace()
-        except ConfigParser.NoOptionError:
-            self.r1 = self.conf.get('Sequence', 'r1').strip("'")
-            self.r2 = self.conf.get('Sequence', 'r2').strip("'")
-            self.fasta, self.quality, self.fastq = False, False, False
-        except ConfigParser.NoOptionError:
-            self.fastq = self.conf.get('Sequence', 'fastq').strip("'")
-            self.fasta, self.quality, self.r1, self.r2 = False, False, False, False
-        except ConfigParser.NoOptionError:
-            print "Cannot find valid sequence files in [Sequence] section of {}".format(self.conf)
-        self.db = self.conf.get('Database', 'DATABASE')
-        self.qual_trim = self.conf.getboolean('Quality', 'QualTrim')
-        self.min_qual = self.conf.getint('Quality', 'MinQualScore')
-        self.drop = self.conf.getboolean('Quality', 'DropN')
-        #self.concat_check = self.conf.getboolean('Concatemers', 'ConcatemerChecking')
-        #self.concat_fuzzy = self.conf.getboolean('Concatemers', 'ConcatemerFuzzyMatching')
-        #self.concat_allowed_errors = self.conf.getboolean('Concatemers', 'ConcatemerAllowedErrors')
-        self.search = self.conf.get('Search', 'SearchFor')
-        #if self.search.lower() in ['innergroups', 'outerinnergroups', 'hierarchicalcombinatorial']:
-        #    assert self.conf.has_section('InnerTags')
-        #elif self.search == 'OuterGroups':
-        #    assert self.conf.has_section('OuterTags')
-        #elif self.search == 'OuterInnerGroups':
-        #    assert self.conf.has_section('OuterTags')
-        #    assert self.conf.has_section('InnerTags')
-        if self.conf.has_section('OuterTags'):
-            self.outer = self.conf.getboolean('OuterTags', 'Search')
-            self.outer_type = self.conf.get('OuterTags', 'TrimType')
-            self.outer_buffer = self.conf.getint('OuterTags', 'Buffer')
-            self.outer_orientation = self.conf.get('OuterTags', 'ThreePrimeOrientation')
-            self.outer_trim = self.conf.getint('OuterTags', 'Trim')
-            self.outer_fuzzy = self.conf.getboolean('OuterTags', 'FuzzyMatching')
-            self.outer_errors = self.conf.getint('OuterTags', 'AllowedErrors')
-        if self.conf.has_section('InnerTags'):
-            self.inner = self.conf.getboolean('InnerTags', 'Search')
-            self.inner_type = self.conf.get('InnerTags', 'TrimType')
-            self.inner_buffer = self.conf.getint('InnerTags', 'Buffer')
-            self.inner_orientation = self.conf.get('InnerTags', 'ThreePrimeOrientation')
-            self.inner_trim = self.conf.getint('InnerTags', 'Trim')
-            self.inner_fuzzy = self.conf.getboolean('InnerTags', 'FuzzyMatching')
-            self.inner_errors = self.conf.getint('InnerTags', 'AllowedErrors')
-        #all_outer             = self._get_all_outer()
-        #all_inner             = self._get_all_inner()
-        self._check_values()
-        self.sequence_tags = self._get_sequence_tags(self._get_all_outer(),
-                self._get_all_inner())
-        if self.conf.has_section('Primers'):
-            self.primers = Primers(
-                    self.conf.get('Primers', 'Forward'),
-                    self.conf.get('Primers', 'Reverse'),
-                    self.conf.getint('Primers', 'Buffer'),
-                    self.conf.getboolean('Primers', 'FuzzyMatching'),
-                    self.conf.getint('Primers', 'AllowedErrors')
-                )
-        self.multiprocessing = conf.getboolean('Multiprocessing', 'Multiprocessing')
-        # compute # cores for computation; leave 1 for db and 1 for sys
-        #pdb.set_trace()
-        if self.multiprocessing == True:
-            if conf.get('Multiprocessing', 'processors').lower() == 'auto' and cpu_count > 2:
-                self.num_procs = cpu_count() - 1
-            elif conf.get('Multiprocessing', 'processors').lower() != 'auto' and \
-                    cpu_count >= conf.getint('Multiprocessing', 'processors'):
-                self.num_procs = conf.getint('Multiprocessing', 'processors')
-        else:
-            self.num_procs = 1
-
-    def __str__(self):
-        return "{0}({1})".format(self.__class__, self.__dict__)
-
-    def __repr__(self):
-        return "<{0} instance at {1}>".format(self.__class__, hex(id(self)))
-
-    def _get_all_outer(self):
-        # if only linkers, you don't need MIDs
-        if self.search.lower() in ['outergroups', 'outerinnergroups',
-                'outercombinatorial', 'hierarchicalcombinatorial']:
-            return dict(self.conf.items('OuterTagSequences'))
-        else:
-            return None
-
-    def _get_all_inner(self):
-        # if only linkers, you don't need MIDs
-        if self.search.lower() in ['innergroups', 'outerinnergroups',
-                'innercombinatorial', 'hierarchicalcombinatorial']:
-            return dict(self.conf.items('InnerTagSequences'))
-        else:
-            return None
-
-    def _get_sequence_tags(self, all_outer, all_inner):
-        return SequenceTags(
-                all_outer,
-                all_inner,
-                self.search,
-                self.conf.items(self.search),
-                self.outer_buffer,
-                self.inner_buffer,
-                self.concat_check,
-                self.outer_type,
-                self.outer_orientation,
-                self.inner_type,
-                self.inner_orientation
-            )
-
-    def _check_values(self):
-        #assert self.outer_type.lower() in ['single', 'both'], \
-        #        "Outer type must be one of ['Single','Both']"
-        #assert self.outer_orientation.lower() in ['reverse', 'forward'], \
-        #        "Innert Orientation must be one of ['Forward','Reverse']"
-        assert self.inner_type.lower() in ['single', 'both'], \
-                "Outer type must be one of ['Single','Both']"
-        assert self.inner_orientation.lower() in ['reverse', 'forward'], \
-                "Inner orientation must be one of ['Forward','Reverse']"
-        assert self.search.lower() in \
-                [
-                    'innergroups',
-                    'outergroups',
-                    'outerinnergroups',
-                    'outercombinatorial',
-                    'innercombinatorial',
-                    'hierarchicalcombinatorial'
-                ], \
-                "SearchFor must be one of ['InnerGroups','OuterGroups'," +\
-                "'OuterInnerGroups']"
-
-
-class Primers:
-    def __init__(self, f, r, buff, fuzzy, errors):
-        self.f, self.r = {}, {}
-        self.buff = buff
-        self.fuzzy = fuzzy
-        self.errors = errors
-        self.f['string'] = [f]
-        self.f['len'] = len(f)
-        self.r['string'] = [r]
-        self.r['len'] = len(r)
-        self.f['regex'] = [re.compile('^[acgtnACGTN]{{0,{}}}{}'.format(self.buff, f))]
-        self.r['regex'] = [re.compile('^[acgtnACGTN]{{0,{}}}{}'.format(self.buff, r))]
+        self.db = ConfDb(conf)
+        self.parallelism = ConfParallelism(conf)
+        self.reads = ConfReads(conf)
+        self.quality = ConfQuality(conf)
+        self.tags = ConfTag(conf)
+        self.site = ConfSite(conf)
 
 
 class SequenceTags:

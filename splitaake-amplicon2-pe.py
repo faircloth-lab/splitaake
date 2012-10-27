@@ -35,7 +35,7 @@ from seqtools.sequence.fasta import FastaQualityReader
 from seqtools.sequence.transform import DNA_reverse_complement
 
 from splitaake.core import *
-from splitaake import pe_db as db
+from splitaake import pe_db2 as db
 
 
 class Demux:
@@ -49,11 +49,11 @@ class Demux:
         self.r1 = None
         self.r2 = None
         self.individual = None
-        self.amb = False
-        self.r1site = None
-        self.r2site = None
-        self.r1tag = None
-        self.r2tag = None
+        self.drop = False
+        self.r1site = SeqSearchResult('site')
+        self.r2site = SeqSearchResult('site')
+        self.r1tag = SeqSearchResult('tag')
+        self.r2tag = SeqSearchResult('tag')
 
     def __str__(self):
         return "{0}({1})".format(self.__class__, self.name)
@@ -62,33 +62,77 @@ class Demux:
         return "<{0} instance at {1}>".format(self.__class__, hex(id(self)))
 
 
+class SeqSearchResult:
+    def __init__(self, typ):
+        self.type = typ
+        self.name = None
+        self.seq = None
+        self.tag = None
+        self.start = None
+        self.end = None
+        self.match = False
+        self.match_type = None
+
+    def __str__(self):
+        return "{0}({1})".format(self.__class__, self.__dict__['name'])
+
+    def __repr__(self):
+        return "<{0} instance at {1}>".format(self.__class__, hex(id(self)))
+
+
 def find_which_reads_have_tags(params, r1, r2, dmux, p=False):
     pair = [r1, r2]
     for index, read in enumerate(pair):
-        forward = find_tag(read.sequence, params.tags, 'r1')
-        if forward.match:
+        dmux.r1tag = find_tag(read.sequence, params.tags, 'r1', 'regex', dmux.r1tag)
+        if dmux.r1tag.match:
             dmux.r1 = read
-            dmux.r1tag = forward
+            #dmux.r1tag = forward
+            trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end)
             if p:
                 print dmux.r1.identifier
-                print "forward = ", dmux.r1.sequence[:20], dmux.r1tag.tag
+                print "regex forward: tag={0} seq={1} type={2} sequence={3}".format(dmux.r1tag.tag, dmux.r1tag.seq, dmux.r1tag.match_type, dmux.r1.sequence[:20])
             #pdb.set_trace()
-            trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end)
             # remove the read from further consideration
             pair.pop(index)
             break
     for index, read in enumerate(pair):
-        reverse = find_tag(read.sequence, params.tags, 'r2')
-        if reverse.match:
+        dmux.r2tag = find_tag(read.sequence, params.tags, 'r2', 'regex', dmux.r2tag)
+        if dmux.r2tag.match:
             dmux.r2 = read
-            dmux.r2tag = reverse
+            #dmux.r2tag = reverse
+            trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end)
             if p:
                 print dmux.r2.identifier
-                print "reverse = ", dmux.r2.sequence[:20], dmux.r2tag.tag
-            trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end)
+                print "regex reverse: tag={0} seq={1} type={2} sequence={3}".format(dmux.r2tag.tag, dmux.r2tag.seq, dmux.r2tag.match_type, dmux.r2.sequence[:20])
+            pair.pop(index)
             break
-    if p:
-        pdb.set_trace()
+    if not dmux.r1tag.match:
+        for index, read in enumerate(pair):
+            dmux.r1tag = find_tag(read.sequence, params.tags, 'r1', 'fuzzy', dmux.r1tag)
+            if dmux.r1tag.match:
+                dmux.r1 = read
+                #dmux.r1tag = forward
+                trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end)
+                if p:
+                    print dmux.r1.identifier
+                    print "fuzzy forward: tag={0} seq={1} type={2} sequence={3}".format(dmux.r1tag.tag, dmux.r1tag.seq, dmux.r1tag.match_type, dmux.r1.sequence[:20])
+                #pdb.set_trace()
+                # remove the read from further consideration
+                pair.pop(index)
+                break
+    if not dmux.r2tag.match:
+        for index, read in enumerate(pair):
+            dmux.r2tag = find_tag(read.sequence, params.tags, 'r2', 'fuzzy', dmux.r2tag)
+            if dmux.r2tag.match:
+                dmux.r2 = read
+                #dmux.r2tag = reverse
+                trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end)
+                if p:
+                    print dmux.r2.identifier
+                    print "fuzzy reverse: tag={0} seq={1} type={2} sequence={3}".format(dmux.r2tag.tag, dmux.r2tag.seq, dmux.r2tag.match_type, dmux.r2.sequence[:20])
+                break
+    #if p:
+    #    pdb.set_trace()
     return dmux
 
 
@@ -103,14 +147,11 @@ def trim_tags_from_reads(read, start, end):
 
 
 def find_which_reads_have_sites(params, dmux):
-    forward = find_site(dmux.r1.sequence, params.site, 'r1')
-    pdb.set_trace()
-    if forward.match:
-        dmux.r1site = forward
+    find_site(dmux.r1.sequence, params.site, 'r1', dmux.r1site)
+    if dmux.r1site.match:
         trim_tags_from_reads(dmux.r1, dmux.r1site.start, dmux.r1site.end)
-    reverse = find_site(dmux.r2.sequence, params.site, 'r2')
-    if reverse.match:
-        dmux.r2site = reverse
+    find_site(dmux.r2.sequence, params.site, 'r2', dmux.r2site)
+    if dmux.r2site.match:
         trim_tags_from_reads(dmux.r2, dmux.r2site.start, dmux.r2site.end)
     return dmux
 
@@ -127,6 +168,9 @@ def split_and_check_reads(pair):
 def singleproc(sequences, results, params, interval=1000, big_interval=10000):
     for pair in sequences:
         r1, r2, header = split_and_check_reads(pair)
+        #print "\n"
+        #print r1.sequence, r1.quality
+        #print r2.sequence, r2.quality
         # create a Demux metadata object to hold ID information
         dmux = Demux(header)
         # quality trim the ends of reads before proceeding
@@ -142,12 +186,24 @@ def singleproc(sequences, results, params, interval=1000, big_interval=10000):
         if not dmux.drop:
             dmux = find_which_reads_have_tags(params, r1, r2, dmux)
             # if we've assigned reads (which means we've assigned tags)
-            if dmux.r1 and dmux.r2:
-                print dmux.name
-                dmux.cluster = params.tags.combo_lookup(dmux.r1tag.name, dmux.r2tag.name)
-                pdb.set_trace()
+            if dmux.r1tag.match and dmux.r2tag.match:
+                dmux.individual = params.tags.combo_lookup(dmux.r1tag.name, dmux.r2tag.name)
+                #print dmux.individual
+                #pdb.set_trace()
                 dmux = find_which_reads_have_sites(params, dmux)
+                #if dmux.r1site and dmux.r2site:
+                #    good += 1
+                #try:
+                #    print "r1 primer= ", dmux.r1site.tag, dmux.r1site.match_type, dmux.r1.sequence[:20]
+                #except:
+                #    pass
+                #try:
+                #    print "r2 primer= ", dmux.r2site.tag, dmux.r2site.match_type, dmux.r2.sequence[:20]
+                #except:
+                #    pass
+                #pdb.set_trace()
         results.put(dmux)
+    return results
 
 
 def multiproc(jobs, results, params):
@@ -183,27 +239,31 @@ def get_work(params):
     return num_reads, work
 
 
-def write_results_out(tags, forward, reverse, fout, rout, count):
-    if tags.fprimer.seq and tags.rprimer.seq:
-        fdist = levenshtein(tags.f.seq, tags.f.match)
-        fout.write(">{0}_{1} {2} orig_bc={3} new_bc={4} bc_diff={5}\n{6}\n".format(
-            tags.cluster,
-            count,
-            forward.read.identifier.split(' ')[0],
-            tags.f.match,
-            tags.f.seq,
-            fdist,
-            forward.read.sequence
+def write_results_out(r1out, r2out, dmux, rowid):
+    if dmux.r1tag.match and dmux.r1site.match and dmux.r2tag.match and dmux.r2site.match:
+        #pdb.set_trace()
+        #fdist = levenshtein(
+        #        dmux.r1tag.seq[dmux.r1tag.start:dmux.r1tag.end],
+        #        dmux.r1tag.tag[dmux.r1tag.start:dmux.r1tag.end]
+        #    )
+        r1out.write(">{0}_{1} {2} expected_index={3} observed_index={4} match_type={5}\n{6}\n".format(
+                dmux.individual,
+                rowid,
+                dmux.r1.identifier.split(' ')[0],
+                dmux.r1tag.tag,
+                dmux.r1tag.seq,
+                dmux.r1tag.match_type,
+                dmux.r1.sequence
             ))
-        rdist = levenshtein(tags.r.seq, tags.r.match)
-        rout.write(">{0}_{1} {2} orig_bc={3} new_bc={4} bc_diff={5}\n{6}\n".format(
-            tags.cluster,
-            count,
-            reverse.read.identifier.split(' ')[0],
-            tags.r.match,
-            tags.r.seq,
-            rdist,
-            reverse.read.sequence
+        #rdist = levenshtein(tags.r.seq, tags.r.match)
+        r2out.write(">{0}_{1} {2} expected_index={3} observed_index={4} match_type={5}\n{6}\n".format(
+                dmux.individual,
+                rowid,
+                dmux.r2.identifier.split(' ')[0],
+                dmux.r2tag.tag,
+                dmux.r2tag.seq,
+                dmux.r2tag.match_type,
+                dmux.r2.sequence
             ))
 
 
@@ -229,8 +289,8 @@ def main():
     if num_reads > 999:
         sys.stdout.write('Running...\n')
     #pdb.set_trace()
-    fout = open('forward-reads.fasta', 'w', 1)
-    rout = open('reverse-reads.fasta', 'w', 1)
+    r1out = open('r1-reads.fasta', 'w', 1)
+    r2out = open('r2-reads.fasta', 'w', 1)
     # MULTICORE
     if params.parallelism.cores > 1:
         jobs = Queue()
@@ -243,25 +303,25 @@ def main():
             jobs.put(unit)
         print "There are {} jobs...".format(num_reads / 10000)
         # setup the processes for the jobs
-        print "Starting {} workers...".format(params.num_procs)
+        print "Starting {} workers...".format(params.parallelism.cores)
         # start the worker processes
-        [Process(target = multiproc, args=(jobs, results, params)).start()
-            for i in xrange(params.num_procs)]
+        [Process(target=multiproc, args=(jobs, results, params)).start()
+            for i in xrange(params.parallelism.cores)]
         # we're putting single results on the results Queue so
         # that the db can (in theory) consume them at
         # a rather consistent rate rather than in spurts
         #for unit in xrange(num_reads):
-        #count = 0
+        count = 0
         for unit in xrange(num_reads):
-            forward, reverse, tags = results.get()
-            rowid = db.insert_record_to_db(cur, tags)
-            write_results_out(tags, forward, reverse, fout, rout, rowid)
+            dmux = results.get()
+            rowid = db.insert_record_to_db(cur, dmux)
+            write_results_out(r1out, r2out, dmux, rowid)
             results.task_done()
             progress(rowid, 10000, 100000)
-            #count += 1
+            count += 1
         # make sure we put None at end of Queue
         # in an amount equiv. to num_procs
-        for unit in xrange(params.num_procs):
+        for unit in xrange(params.parallelism.cores):
             jobs.put(None)
         # join the results, so that they can finish
         results.join()
@@ -275,12 +335,14 @@ def main():
         # is identical.
         fake_queue = ListQueue()
         results = singleproc(work, fake_queue, params)
+        count = 0
         for dmux in results:
             rowid = db.insert_record_to_db(cur, dmux)
-            write_results_out(tags, forward, reverse, fout, rout, rowid)
+            write_results_out(r1out, r2out, dmux, rowid)
             progress(rowid, 10000, 100000)
-    fout.close()
-    rout.close()
+            count += 1
+    r1out.close()
+    r2out.close()
     conn.commit()
     cur.close()
     conn.close()

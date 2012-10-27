@@ -43,10 +43,10 @@ def create_db_and_new_tables(db_name):
                 rpseq text,
                 rpmatch text,
                 rptype text,
-                cluster text
+                individual text
             )'''
         )
-        cur.execute("CREATE INDEX idx_sequence_cluster on tags(cluster)")
+        cur.execute("CREATE INDEX idx_sequence_cluster on tags(individual)")
     except sqlite3.OperationalError, e:
         #pdb.set_trace()
         if "already exists" in e[0]:
@@ -62,7 +62,7 @@ def create_db_and_new_tables(db_name):
     return conn, cur
 
 
-def insert_record_to_db(cur, tags):
+def insert_record_to_db(cur, dmux):
     cur.execute('''INSERT INTO tags (
             name,
             f,
@@ -79,26 +79,26 @@ def insert_record_to_db(cur, tags):
             rpseq,
             rpmatch,
             rptype,
-            cluster
+            individual
         )
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (
-            tags.name,
-            tags.f.name,
-            tags.f.seq,
-            tags.f.match,
-            tags.f.match_type,
-            tags.r.name,
-            tags.r.seq,
-            tags.r.match,
-            tags.r.match_type,
-            tags.fprimer.seq,
-            tags.fprimer.match,
-            tags.fprimer.match_type,
-            tags.rprimer.seq,
-            tags.rprimer.match,
-            tags.rprimer.match_type,
-            tags.cluster
+            dmux.name,
+            dmux.r1tag.name,
+            dmux.r1tag.tag,
+            dmux.r1tag.seq,
+            dmux.r1tag.match_type,
+            dmux.r2tag.name,
+            dmux.r2tag.tag,
+            dmux.r2tag.seq,
+            dmux.r2tag.match_type,
+            dmux.r1site.tag,
+            dmux.r1site.seq,
+            dmux.r1site.match_type,
+            dmux.r2site.tag,
+            dmux.r2site.seq,
+            dmux.r2site.match_type,
+            dmux.individual
         )
     )
     return cur.lastrowid
