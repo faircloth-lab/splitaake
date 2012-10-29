@@ -30,6 +30,7 @@ import itertools
 #from seqtools.sequence.fastq import FastqReader
 #from seqtools.sequence.fasta import FastaQualityReader
 from seqtools.sequence.transform import DNA_reverse_complement
+from jellyfish import levenshtein_distance as levenshtein
 
 #from demuxipy import db
 from splitaake import pairwise2
@@ -67,11 +68,12 @@ class AlignScore:
         self.score = 0
         self.start = None
         self.end = None
+        self.offset = 0
         self.matches = 0
         self.errors = None
         self.allowed_errors = allowed_errors
 
-    def set(self, tag, seq_match, seq_span, score, start, end, match, errors):
+    def set(self, tag, seq_match, seq_span, score, start, end, match, errors, offset):
         self.tag = tag
         self.seq_match = seq_match
         self.seq_span = seq_span
@@ -80,6 +82,7 @@ class AlignScore:
         self.end = end
         self.matches = match
         self.errors = errors
+        self.offset = offset
 
 
 def matches(tag, seq_span, tag_span, allowed_errors):
@@ -112,16 +115,35 @@ def align(seq, tags, allowed_errors):
                     -0.5,
                     one_alignment_only=True
                 )[0]
-            try:
-                start = max([k for k, v in enumerate(tag_match) if v.islower()]) + 1
-            except ValueError, e:
-                if e.message == 'max() arg is an empty sequence':
-                    start = 0
-                else:
-                    raise ValueError(e)
+            # the offset used below is a mechanism to deal with trimmng the trailing
+            # lowercase base when the tag sequence is ATCGac or similar.  We want to
+            # compare the sequence (in upper()) to the tag, but we want to trim the
+            # sequence + the spacer from the resulting read.  This is not a problem
+            # for tags like acATCG, since we're trimming from the end of the tag forward.
+            if tag.string[0].islower():
+                offset = 0
+                try:
+                    start = max([k for k, v in enumerate(tag_match) if v.islower()]) + 1
+                except ValueError, e:
+                    if e.message == 'max() arg is an empty sequence':
+                        start = 0
+                    else:
+                        raise ValueError(e)
+                end = start + tag.tag_len
+            elif tag.string[-1].islower():
+                offset = 0
+                try:
+                    positions = [k for k, v in enumerate(tag_match) if v.islower()]
+                    end = min(positions)
+                    offset = (max(positions) - end) + 1
+                except ValueError, e:
+                    if e.message == 'max() arg is an empty sequence':
+                        start = 0
+                    else:
+                        raise ValueError(e)
+                start = end - tag.tag_len
             if start is None:
                 start = 0
-            end = start + tag.tag_len
             seq_span = seq_match[start:end]
             tag_span = tag_match[start:end]
             match, errors = matches(tag, seq_span, tag_span, allowed_errors)
@@ -136,9 +158,7 @@ def align(seq, tags, allowed_errors):
             #print "{}\t\t{}, matches = {}, errors = {}, good = {}".format(seq_match, seq_span, match, errors, start_ok)
             #print "{}\t\t{}".format(tag_match, tag_span)
             if start_ok and match >= (tag.tag_len - allowed_errors) and (match > score.matches) and (errors <= score.allowed_errors):
-                score.set(tag, seq_match, seq_span, score, start, end, match, errors)
-                #print "score set"
-                #pdb.set_trace()
+                score.set(tag, seq_match, seq_span, score, start, end, match, errors, offset)
         except IndexError:
             pass
     if score.matches is not 0:
@@ -160,6 +180,7 @@ def find_tag(seq, tags, read, match_type, result):
     """Matching methods for left linker - regex first, followed by fuzzy (SW)
     alignment, if the option is passed"""
     #result = SeqSearchResult('tag')
+    #pdb.set_trace()
     if read == 'r1':
         tag_group = tags.r1
     elif read == 'r2':
@@ -176,16 +197,23 @@ def find_tag(seq, tags, read, match_type, result):
                 result.tag = tag.string
                 result.seq = seq[result.start:result.end]
                 result.name = tags.name_lookup(result.tag)
+                result.offset = 0
                 break
     elif match_type == 'fuzzy':
         match = align(seq[:tags.max_tag_length], tag_group, tags.errors)
         if match:
             result.match = True
             result.match_type = 'fuzzy'
-            result.tag = match.tag.string
+            result.tag = match.tag.tag
             result.seq = match.seq_span
-            result.name = tags.name_lookup(result.tag)
+            result.name = tags.name_lookup(match.tag.string)
             result.start, result.end = get_align_match_position(match.seq_span, match.start, match.end)
+            result.offset = match.offset
+    # check ALL resulting values for correct levenshtein distance or
+    # reset match parameters to None/False
+    if result.match:
+        if not levenshtein(result.seq.upper(), result.tag.upper()) <= tags.errors:
+            result.reset()
     return result
 
 

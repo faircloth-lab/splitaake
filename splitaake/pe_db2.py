@@ -43,6 +43,8 @@ def create_db_and_new_tables(db_name):
                 rpseq text,
                 rpmatch text,
                 rptype text,
+                foverrun text,
+                roverrun text,
                 individual text
             )'''
         )
@@ -79,9 +81,11 @@ def insert_record_to_db(cur, dmux):
             rpseq,
             rpmatch,
             rptype,
+            foverrun,
+            roverrun,
             individual
         )
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (
             dmux.name,
             dmux.r1tag.name,
@@ -98,6 +102,8 @@ def insert_record_to_db(cur, dmux):
             dmux.r2site.tag,
             dmux.r2site.seq,
             dmux.r2site.match_type,
+            dmux.r1overrun.match,
+            dmux.r2overrun.match,
             dmux.individual
         )
     )

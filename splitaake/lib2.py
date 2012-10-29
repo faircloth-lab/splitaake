@@ -120,12 +120,15 @@ class ConfTag:
         self.three_p_orient = None
         self.fuzzy = None
         self.errors = None
+
         self._get_tag_values(conf)
         self._get_combinations(conf)
         self._get_sequences(conf)
         self._get_reverse_sequences()
         self._get_r1_tags()
         self._get_r2_tags()
+        #self._get_five_p_overrun(conf)
+        #self._get_three_p_overrun(conf)
 
     def _get_tag_values(self, conf):
         self.fuzzy = conf.getboolean('TagSetup', 'FuzzyMatching')
@@ -178,13 +181,14 @@ class TagMeta:
         self._get_tag_parts()
         self.string_len = len(self.string)
         self.tag_len = len(self.tag)
-        wild_five = ''.join(['{}*'.format(i) for i in self.five_p])
-        wild_three = ''.join(['{}*'.format(i) for i in self.three_p])
+        wild_five = ''.join(['{}?'.format(i) for i in self.five_p])
+        wild_three = ''.join(['{}?'.format(i) for i in self.three_p])
         self.regex = re.compile('^{0}({1}){2}'.format(wild_five, self.tag, wild_three), re.IGNORECASE)
         if self.five_p != '':
             self.five_p_start = re.compile('^{0}+'.format('*'.join(list(self.five_p)), re.IGNORECASE))
         else:
             self.five_p_start = None
+        #pdb.set_trace()
 
     def _get_tag_parts(self):
         regex = re.compile('^([acgt]*)([ACGT]+)([acgt]*)$')
@@ -193,6 +197,34 @@ class TagMeta:
             self.five_p, self.tag, self.three_p = result.groups()
         except:
             pdb.set_trace()
+
+
+class ConfOverruns(dict):
+    def __init__(self, conf, tags, site):
+        dict.__init__(self)
+        self.trim = conf.getboolean('TagSetup', 'TrimOverruns')
+        for combo in tags.name_d.keys():
+            r1name, r2name = combo.split(',')
+            r1t = tags.seq_d[r1name]
+            r2t = tags.seq_d[r2name]
+            both = {'r1':[OverrunsMeta(r2t, i.string) for i in site.r2], 'r2':[OverrunsMeta(r1t, i.string) for i in site.r1]}
+            dict.__setitem__(self, combo, both)
+        #pdb.set_trace()
+
+    def __getitem__(self, key):
+        val = dict.__getitem__(self, key)
+        return val
+
+
+class OverrunsMeta:
+    def __init__(self, tag, site):
+        #nucleotides = set(list('ACGTacgt'))
+        #for base in string:
+        #    assert base in nucleotides, ValueError("[{0}] Foward/Reverse bases must be in the alphabet [ACGTacgt]".format(section))
+        #self.name = name
+        self.string = DNA_reverse_complement("{0}{1}".format(tag, site)).upper()
+        self.string_len = len(self.string)
+        self.regex = re.compile("({0})".format(self.string), re.IGNORECASE)
 
 
 class ConfSite:
@@ -271,6 +303,7 @@ class Parameters:
         self.quality = ConfQuality(conf)
         self.tags = ConfTag(conf)
         self.site = ConfSite(conf)
+        self.overruns = ConfOverruns(conf, self.tags, self.site)
 
 
 class SequenceTags:

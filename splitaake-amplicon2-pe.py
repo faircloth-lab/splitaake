@@ -27,7 +27,6 @@ import time
 import ConfigParser
 
 from itertools import islice
-from jellyfish import levenshtein_distance as levenshtein
 from multiprocessing import Process, Queue, JoinableQueue, cpu_count
 
 from seqtools.sequence.fastq import FastqReader
@@ -54,6 +53,8 @@ class Demux:
         self.r2site = SeqSearchResult('site')
         self.r1tag = SeqSearchResult('tag')
         self.r2tag = SeqSearchResult('tag')
+        self.r1overrun = SeqSearchResult('overrun')
+        self.r2overrun = SeqSearchResult('overrun')
 
     def __str__(self):
         return "{0}({1})".format(self.__class__, self.name)
@@ -79,6 +80,15 @@ class SeqSearchResult:
     def __repr__(self):
         return "<{0} instance at {1}>".format(self.__class__, hex(id(self)))
 
+    def reset(self):
+        self.name = None
+        self.seq = None
+        self.tag = None
+        self.start = None
+        self.end = None
+        self.match = False
+        self.match_type = None
+
 
 def find_which_reads_have_tags(params, r1, r2, dmux, p=False):
     pair = [r1, r2]
@@ -87,7 +97,7 @@ def find_which_reads_have_tags(params, r1, r2, dmux, p=False):
         if dmux.r1tag.match:
             dmux.r1 = read
             #dmux.r1tag = forward
-            trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end)
+            trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end + dmux.r1tag.offset)
             if p:
                 print dmux.r1.identifier
                 print "regex forward: tag={0} seq={1} type={2} sequence={3}".format(dmux.r1tag.tag, dmux.r1tag.seq, dmux.r1tag.match_type, dmux.r1.sequence[:20])
@@ -100,7 +110,7 @@ def find_which_reads_have_tags(params, r1, r2, dmux, p=False):
         if dmux.r2tag.match:
             dmux.r2 = read
             #dmux.r2tag = reverse
-            trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end)
+            trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end + dmux.r2tag.offset)
             if p:
                 print dmux.r2.identifier
                 print "regex reverse: tag={0} seq={1} type={2} sequence={3}".format(dmux.r2tag.tag, dmux.r2tag.seq, dmux.r2tag.match_type, dmux.r2.sequence[:20])
@@ -112,7 +122,7 @@ def find_which_reads_have_tags(params, r1, r2, dmux, p=False):
             if dmux.r1tag.match:
                 dmux.r1 = read
                 #dmux.r1tag = forward
-                trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end)
+                trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end + dmux.r1tag.offset)
                 if p:
                     print dmux.r1.identifier
                     print "fuzzy forward: tag={0} seq={1} type={2} sequence={3}".format(dmux.r1tag.tag, dmux.r1tag.seq, dmux.r1tag.match_type, dmux.r1.sequence[:20])
@@ -126,13 +136,13 @@ def find_which_reads_have_tags(params, r1, r2, dmux, p=False):
             if dmux.r2tag.match:
                 dmux.r2 = read
                 #dmux.r2tag = reverse
-                trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end)
+                trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end + dmux.r2tag.offset)
                 if p:
                     print dmux.r2.identifier
                     print "fuzzy reverse: tag={0} seq={1} type={2} sequence={3}".format(dmux.r2tag.tag, dmux.r2tag.seq, dmux.r2tag.match_type, dmux.r2.sequence[:20])
                 break
-    #if p:
-    #    pdb.set_trace()
+    if p:
+        pdb.set_trace()
     return dmux
 
 
@@ -143,7 +153,7 @@ def get_cluster(params, tags):
 
 
 def trim_tags_from_reads(read, start, end):
-    return read.slice(end - start, len(read.sequence), False)
+    return read.slice(end, len(read.sequence), False)
 
 
 def find_which_reads_have_sites(params, dmux):
@@ -165,12 +175,54 @@ def split_and_check_reads(pair):
     return r1, r2, identifiers[0]
 
 
+def find_overrun(seq, sites, read, result):
+    if read == 'r1':
+        site_group = sites['r1']
+    elif read == 'r2':
+        site_group = sites['r2']
+    for site in site_group:
+        match = site.regex.search(seq)
+        if match is not None:
+            result.match = True
+            # by default, this is true
+            assert match.groups()[0] == site.string
+            result.match_type = 'regex'
+            result.start, result.end = match.start(), match.end()
+            result.tag = site.string
+            result.seq = seq[result.start:result.end]
+            break
+    '''
+    if match is None and sites.fuzzy:
+        match = align(seq[:sites.max_site_length], site_group, sites.errors)
+        if match:
+            result.match = True
+            result.match_type = 'fuzzy'
+            result.tag = match.tag.string
+            result.seq = match.seq_span
+            result.start, result.end = get_align_match_position(match.seq_span, match.start, match.end)
+    '''
+    return result
+
+
+def find_which_reads_have_overruns(params, dmux):
+    p = params.overruns["{},{}".format(
+            dmux.r1tag.name,
+            dmux.r2tag.name
+            )
+        ]
+    find_overrun(dmux.r1.sequence, p, 'r1', dmux.r1overrun)
+    find_overrun(dmux.r2.sequence, p, 'r2', dmux.r2overrun)
+    # if we overrun on one read, we should always overrun on the opposite read,
+    # so only trim when this is True for both
+    if dmux.r1overrun.match == True and dmux.r2overrun.match == True:
+        dmux.r1.slice(0, dmux.r1overrun.start, False)
+        dmux.r2.slice(0, dmux.r2overrun.start, False)
+    return dmux
+
+
 def singleproc(sequences, results, params, interval=1000, big_interval=10000):
     for pair in sequences:
         r1, r2, header = split_and_check_reads(pair)
-        #print "\n"
-        #print r1.sequence, r1.quality
-        #print r2.sequence, r2.quality
         # create a Demux metadata object to hold ID information
         dmux = Demux(header)
         # quality trim the ends of reads before proceeding
@@ -181,9 +233,8 @@ def singleproc(sequences, results, params, interval=1000, big_interval=10000):
             if 'N' in r1.sequence or 'N' in r2.sequence:
                 dmux.drop = True
         # keep all reads when params.quality.drop_n == FALSE
-        else:
-            dmux.drop = False
         if not dmux.drop:
+            #pdb.set_trace()
             dmux = find_which_reads_have_tags(params, r1, r2, dmux)
             # if we've assigned reads (which means we've assigned tags)
             if dmux.r1tag.match and dmux.r2tag.match:
@@ -191,17 +242,8 @@ def singleproc(sequences, results, params, interval=1000, big_interval=10000):
                 #print dmux.individual
                 #pdb.set_trace()
                 dmux = find_which_reads_have_sites(params, dmux)
-                #if dmux.r1site and dmux.r2site:
-                #    good += 1
-                #try:
-                #    print "r1 primer= ", dmux.r1site.tag, dmux.r1site.match_type, dmux.r1.sequence[:20]
-                #except:
-                #    pass
-                #try:
-                #    print "r2 primer= ", dmux.r2site.tag, dmux.r2site.match_type, dmux.r2.sequence[:20]
-                #except:
-                #    pass
-                #pdb.set_trace()
+                if params.overruns.trim == True:
+                    dmux = find_which_reads_have_overruns(params, dmux)
         results.put(dmux)
     return results
 
@@ -233,7 +275,6 @@ def get_work(params):
             work = split_every(10000, merged)
         else:
             work = merge_fastq(reads1, reads2)
-        #pdb.set_trace()
     except:
         raise IOError("Cannot find r1 and r2 parameters in configuration file")
     return num_reads, work
@@ -241,11 +282,6 @@ def get_work(params):
 
 def write_results_out(r1out, r2out, dmux, rowid):
     if dmux.r1tag.match and dmux.r1site.match and dmux.r2tag.match and dmux.r2site.match:
-        #pdb.set_trace()
-        #fdist = levenshtein(
-        #        dmux.r1tag.seq[dmux.r1tag.start:dmux.r1tag.end],
-        #        dmux.r1tag.tag[dmux.r1tag.start:dmux.r1tag.end]
-        #    )
         r1out.write(">{0}_{1} {2} expected_index={3} observed_index={4} match_type={5}\n{6}\n".format(
                 dmux.individual,
                 rowid,
@@ -255,7 +291,6 @@ def write_results_out(r1out, r2out, dmux, rowid):
                 dmux.r1tag.match_type,
                 dmux.r1.sequence
             ))
-        #rdist = levenshtein(tags.r.seq, tags.r.match)
         r2out.write(">{0}_{1} {2} expected_index={3} observed_index={4} match_type={5}\n{6}\n".format(
                 dmux.individual,
                 rowid,
