@@ -238,12 +238,14 @@ def singleproc(sequences, results, params, interval=1000, big_interval=10000):
             dmux = find_which_reads_have_tags(params, r1, r2, dmux)
             # if we've assigned reads (which means we've assigned tags)
             if dmux.r1tag.match and dmux.r2tag.match:
-                dmux.individual = params.tags.combo_lookup(dmux.r1tag.name, dmux.r2tag.name)
-                #print dmux.individual
-                #pdb.set_trace()
-                dmux = find_which_reads_have_sites(params, dmux)
-                if params.overruns.trim == True:
-                    dmux = find_which_reads_have_overruns(params, dmux)
+                try:
+                    dmux.individual = params.tags.combo_lookup(dmux.r1tag.name, dmux.r2tag.name)
+                except KeyError:
+                    dmux.individual = None
+                if dmux.individual is not None:
+                    dmux = find_which_reads_have_sites(params, dmux)
+                    if params.overruns.trim == True:
+                        dmux = find_which_reads_have_overruns(params, dmux)
         results.put(dmux)
     return results
 
@@ -280,8 +282,13 @@ def get_work(params):
     return num_reads, work
 
 
-def write_results_out(r1out, r2out, dmux, rowid):
+def write_results_out(cur, rowid, params, dmux):
     if dmux.r1tag.match and dmux.r1site.match and dmux.r2tag.match and dmux.r2site.match:
+        if len(dmux.r1) >= params.quality.drop_len and len(dmux.r2) >= params.quality.drop_len:
+            params.storage.output[dmux.individual]['R1'].write(dmux.r1)
+            params.storage.output[dmux.individual]['R2'].write(dmux.r2)
+            cur.execute("UPDATE tags SET written = 1 WHERE rowid = ?", (rowid,))
+        '''
         r1out.write(">{0}_{1} {2} expected_index={3} observed_index={4} match_type={5}\n{6}\n".format(
                 dmux.individual,
                 rowid,
@@ -300,6 +307,7 @@ def write_results_out(r1out, r2out, dmux, rowid):
                 dmux.r2tag.match_type,
                 dmux.r2.sequence
             ))
+        '''
 
 
 def main():
@@ -316,6 +324,8 @@ def main():
     # and cursor
     if params.db.create:
         conn, cur = db.create_db_and_new_tables(params.db.name)
+    # alert user we're dropping reads
+    print "[WARN] Dropping all demultiplexed reads ≤ {0} bp long".format(params.quality.drop_len)
     # get num reads and split up work
     print "Splitting reads into work units..."
     num_reads, work = get_work(params)
@@ -324,8 +334,8 @@ def main():
     if num_reads > 999:
         sys.stdout.write('Running...\n')
     #pdb.set_trace()
-    r1out = open('r1-reads.fasta', 'w', 1)
-    r2out = open('r2-reads.fasta', 'w', 1)
+    #r1out = open('r1-reads.fasta', 'w', 1)
+    #r2out = open('r2-reads.fasta', 'w', 1)
     # MULTICORE
     if params.parallelism.cores > 1:
         jobs = Queue()
@@ -350,7 +360,7 @@ def main():
         for unit in xrange(num_reads):
             dmux = results.get()
             rowid = db.insert_record_to_db(cur, dmux)
-            write_results_out(r1out, r2out, dmux, rowid)
+            write_results_out(cur, rowid, params, dmux)
             results.task_done()
             progress(rowid, 10000, 100000)
             count += 1
@@ -373,11 +383,10 @@ def main():
         count = 0
         for dmux in results:
             rowid = db.insert_record_to_db(cur, dmux)
-            write_results_out(r1out, r2out, dmux, rowid)
+            write_results_out(cur, rowid, params, dmux)
             progress(rowid, 10000, 100000)
             count += 1
-    r1out.close()
-    r2out.close()
+    params.storage.close()
     conn.commit()
     cur.close()
     conn.close()
