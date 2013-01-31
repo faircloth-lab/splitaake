@@ -90,7 +90,7 @@ class Tags:
                 self.files[name][i] = fastq.FasterFastqWriter(os.path.join(pth, r))
 
     def close_zip_files(self):
-        pdb.set_trace()
+        #pdb.set_trace()
         for f in self.files.values():
             for i in [1, 2]:
                 f[i].close()
