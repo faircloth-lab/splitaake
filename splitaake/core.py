@@ -44,14 +44,27 @@ def motd():
     """Print a welcome message """
     motd = """
     ###############################################################
-    #                       demuxi.py                             #
+    #           _____                          _                  #
+    #          /  ___|     | (_) |            | |                 #
+    #          \ `--. _ __ | |_| |_ __ _  __ _| | _____           #
+    #           `--. \ '_ \| | | __/ _` |/ _` | |/ / _ \          #
+    #          /\__/ / |_) | | | || (_| | (_| |   <  __/          #
+    #          \____/| .__/|_|_|\__\__,_|\__,_|_|\_\___|          #
+    #                | |                                          #
+    #                |_|                                          #
     #                                                             #
-    # Demultiplexing of hierarchically tagged, massively parallel #
-    # DNA sequence reads                                          #
+    # Demultiplexing of:                                          #
+    #                                                             #
+    #       * Reads                                               #
+    #       * Hierarchically tagged amplicons                     #
+    #       * Combinatorially-tagged amplicons                    #
+    #       * 2RAD data                                           #
+    #                                                             #
+    # from Illumina sequencing.                                   #
     #                                                             #
     #                                                             #
-    # Copyright (c) 2009-2011 Brant C. Faircloth                  #
-    #                                                             #
+    # Copyright (c) 2009-2012 Brant C. Faircloth                  #
+    # Available under 3-clause BSD license                        #
     #                                                             #
     # Ecology and Evolutionary Biology                            #
     # 621 Charles E. Young Drive                                  #
@@ -142,6 +155,8 @@ def align(seq, tags, allowed_errors):
                     else:
                         raise ValueError(e)
                 start = end - tag.tag_len
+            else:
+                offset = 0
             if start is None:
                 start = 0
             seq_span = seq_match[start:end]
