@@ -36,6 +36,7 @@ def create_db_and_new_tables(db_name):
                 fpseq text,
                 fpmatch text,
                 fptype text,
+                f_trim_len int,
                 r text,
                 rseq text,
                 rmatch text,
@@ -43,9 +44,11 @@ def create_db_and_new_tables(db_name):
                 rpseq text,
                 rpmatch text,
                 rptype text,
+                r_trim_len int,
                 foverrun text,
                 roverrun text,
-                individual text
+                individual text,
+                written int DEFAULT 0
             )'''
         )
         cur.execute("CREATE INDEX idx_sequence_cluster on tags(individual)")
@@ -65,6 +68,14 @@ def create_db_and_new_tables(db_name):
 
 
 def insert_record_to_db(cur, dmux):
+    if dmux.r1 == None:
+        r1len = None
+    else:
+        r1len = len(dmux.r1)
+    if dmux.r2 == None:
+        r2len = None
+    else:
+        r2len = len(dmux.r2)
     cur.execute('''INSERT INTO tags (
             name,
             f,
@@ -74,6 +85,7 @@ def insert_record_to_db(cur, dmux):
             fpseq,
             fpmatch,
             fptype,
+            f_trim_len,
             r,
             rseq,
             rmatch,
@@ -81,11 +93,12 @@ def insert_record_to_db(cur, dmux):
             rpseq,
             rpmatch,
             rptype,
+            r_trim_len,
             foverrun,
             roverrun,
             individual
         )
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (
             dmux.name,
             dmux.r1tag.name,
@@ -95,6 +108,7 @@ def insert_record_to_db(cur, dmux):
             dmux.r1site.tag,
             dmux.r1site.seq,
             dmux.r1site.match_type,
+            r1len,
             dmux.r2tag.name,
             dmux.r2tag.tag,
             dmux.r2tag.seq,
@@ -102,6 +116,7 @@ def insert_record_to_db(cur, dmux):
             dmux.r2site.tag,
             dmux.r2site.seq,
             dmux.r2site.match_type,
+            r2len,
             dmux.r1overrun.match,
             dmux.r2overrun.match,
             dmux.individual
