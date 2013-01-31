@@ -16,6 +16,7 @@ import ConfigParser
 from collections import defaultdict
 from multiprocessing import cpu_count
 from seqtools.sequence.fasta import FastaSequence
+from seqtools.sequence.fastq import FastqWriter
 from seqtools.sequence.transform import DNA_reverse_complement, DNA_complement
 from seqtools.sequence.transform import reverse as DNA_reverse
 
@@ -110,6 +111,10 @@ class ConfQuality:
         self.trim = conf.getboolean('QualitySetup', 'trim')
         self.dropn = conf.getboolean('QualitySetup', 'dropn')
         self.min = conf.getint('QualitySetup', 'min')
+        try:
+            self.drop_len = conf.getint('QualitySetup', 'droplen')
+        except:
+            self.drop_len = 1
 
 
 class ConfTag:
@@ -294,6 +299,25 @@ class ConfSite:
         return new_sites
 
 
+class ConfStorage:
+    def __init__(self, conf, tags):
+        self.output = defaultdict(lambda: defaultdict(str))
+        tld = 'splitaake-output'
+        os.mkdir(tld)
+        for indiv in tags.name_d.values():
+            fpath = os.path.join(tld, indiv)
+            os.mkdir(fpath)
+            for read in ['R1', 'R2']:
+                name = "{0}-{1}.fastq".format(indiv, read)
+                fname = os.path.join(fpath, name)
+                self.output[indiv][read] = FastqWriter(fname)
+
+    def close(self):
+        for name, files in self.output.iteritems():
+            for file in files.values():
+                file.close()
+
+
 class Parameters:
     '''linkers.py run parameters'''
     def __init__(self, conf):
@@ -304,6 +328,7 @@ class Parameters:
         self.tags = ConfTag(conf)
         self.site = ConfSite(conf)
         self.overruns = ConfOverruns(conf, self.tags, self.site)
+        self.storage = ConfStorage(conf, self.tags)
 
 
 class SequenceTags:
