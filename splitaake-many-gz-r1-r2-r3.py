@@ -141,7 +141,7 @@ def main():
                 dist = distance(tags.seqs, i[2])
                 quality = get_quality(i[3])
                 positions = numpy.where(dist == 0)[0]
-                if positions is None and i[2] not in tags.no_correct:
+                if positions is None and min(quality) >= 20 and i[2] not in tags.no_correct:
                     positions = numpy.where(dist == 1)[0]
                 if (positions is not None) and (len(positions) == 1) and min(quality) >= 20:
                     # assert headers match
