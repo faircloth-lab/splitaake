@@ -5,9 +5,10 @@ Author: Brant Faircloth
 Created by Brant Faircloth on 01 October 2011 11:10 PDT (-0700)
 Copyright (c) 2011 Brant C. Faircloth. All rights reserved.
 
-Description:  common files for demuxi.py
+Description:  config parameter and tag combination classes
 
 """
+
 import os
 import re
 import sys
