@@ -1,7 +1,7 @@
 
 
 __author__ = 'Brant Faircloth'
-__copyright__ = 'Copyright (c) 2010-2011, Brant C. Faircloth'
+__copyright__ = 'Copyright (c) 2010-2013, Brant C. Faircloth'
 __credits__ = ['Brant Faircloth']
 __license__ = 'http://www.opensource.org/licenses/BSD-3-Clause'
 __version__ = '1.0'
@@ -29,7 +29,7 @@ except ImportError: # pragma: no cover
 
 
 from db import *
-from lib import *
+from config import *
 from pairwise2 import *
 from core import *
 #from core.tests import test
