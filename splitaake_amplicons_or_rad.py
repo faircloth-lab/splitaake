@@ -13,17 +13,9 @@ Description:
 
 import pdb
 
-#import os
-import sys
 import re
-#import gzip
+import sys
 import time
-#import numpy
-#import string
-#import cPickle
-#import sqlite3
-#import argparse
-#import itertools
 import ConfigParser
 
 from itertools import islice
@@ -288,26 +280,6 @@ def write_results_out(cur, rowid, params, dmux):
             params.storage.output[dmux.individual]['R1'].write(dmux.r1)
             params.storage.output[dmux.individual]['R2'].write(dmux.r2)
             cur.execute("UPDATE tags SET written = 1 WHERE rowid = ?", (rowid,))
-        '''
-        r1out.write(">{0}_{1} {2} expected_index={3} observed_index={4} match_type={5}\n{6}\n".format(
-                dmux.individual,
-                rowid,
-                dmux.r1.identifier.split(' ')[0],
-                dmux.r1tag.tag,
-                dmux.r1tag.seq,
-                dmux.r1tag.match_type,
-                dmux.r1.sequence
-            ))
-        r2out.write(">{0}_{1} {2} expected_index={3} observed_index={4} match_type={5}\n{6}\n".format(
-                dmux.individual,
-                rowid,
-                dmux.r2.identifier.split(' ')[0],
-                dmux.r2tag.tag,
-                dmux.r2tag.seq,
-                dmux.r2tag.match_type,
-                dmux.r2.sequence
-            ))
-        '''
 
 
 def main():
