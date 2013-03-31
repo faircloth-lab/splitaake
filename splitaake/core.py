@@ -63,7 +63,7 @@ def motd():
     # from Illumina sequencing.                                   #
     #                                                             #
     #                                                             #
-    # Copyright (c) 2009-2012 Brant C. Faircloth                  #
+    # Copyright (c) 2009-2013 Brant C. Faircloth                  #
     # Available under 3-clause BSD license                        #
     #                                                             #
     # Ecology and Evolutionary Biology                            #
