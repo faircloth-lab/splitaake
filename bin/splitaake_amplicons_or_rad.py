@@ -34,7 +34,7 @@ def get_args():
             action=FullPaths
         )
     parser.add_argument('--job-size',
-            help="The job size to use",
+            help="The number of sequence to add to each job",
             type=int,
             default=10000
         )
