@@ -116,12 +116,9 @@ def motd():
     #                                                             #
     # Demultiplexing of:                                          #
     #                                                             #
-    #       * Reads                                               #
-    #       * Hierarchically tagged amplicons                     #
-    #       * Combinatorially-tagged amplicons                    #
-    #       * 2RAD data                                           #
-    #                                                             #
-    # from Illumina sequencing.                                   #
+    #     * Illumina Reads                                        #
+    #     * Illumina sequenced, combinatorially-tagged amplicons  #
+    #     * Illumina sequence 2RAD data                           #
     #                                                             #
     #                                                             #
     # Copyright (c) 2009-2013 Brant C. Faircloth                  #
