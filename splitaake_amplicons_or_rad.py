@@ -17,199 +17,28 @@ import re
 import sys
 import time
 import ConfigParser
-
-from itertools import islice
 from multiprocessing import Process, Queue, JoinableQueue, cpu_count
-
 from seqtools.sequence.fastq import FastqReader
 from seqtools.sequence.fasta import FastaQualityReader
 from seqtools.sequence.transform import DNA_reverse_complement
-
 from splitaake.core import *
-from splitaake import pe_db2 as db
+from splitaake import db
 
 
-class Demux:
-    '''Trimming, tag, and sequence data for individual reads'''
-    def __init__(self, identifier):
-        # super(Params, self).__init__()
-        #assert isinstance(sequence, FastaSequence), \
-        #    'The Record class must be instantiated with a FastaSequence object'
-        # a biopython sequence object
-        self.name = identifier
-        self.r1 = None
-        self.r2 = None
-        self.individual = None
-        self.drop = False
-        self.r1site = SeqSearchResult('site')
-        self.r2site = SeqSearchResult('site')
-        self.r1tag = SeqSearchResult('tag')
-        self.r2tag = SeqSearchResult('tag')
-        self.r1overrun = SeqSearchResult('overrun')
-        self.r2overrun = SeqSearchResult('overrun')
-
-    def __str__(self):
-        return "{0}({1})".format(self.__class__, self.name)
-
-    def __repr__(self):
-        return "<{0} instance at {1}>".format(self.__class__, hex(id(self)))
-
-
-class SeqSearchResult:
-    def __init__(self, typ):
-        self.type = typ
-        self.name = None
-        self.seq = None
-        self.tag = None
-        self.start = None
-        self.end = None
-        self.match = False
-        self.match_type = None
-
-    def __str__(self):
-        return "{0}({1})".format(self.__class__, self.__dict__['name'])
-
-    def __repr__(self):
-        return "<{0} instance at {1}>".format(self.__class__, hex(id(self)))
-
-    def reset(self):
-        self.name = None
-        self.seq = None
-        self.tag = None
-        self.start = None
-        self.end = None
-        self.match = False
-        self.match_type = None
-
-
-def find_which_reads_have_tags(params, r1, r2, dmux, p=False):
-    pair = [r1, r2]
-    for index, read in enumerate(pair):
-        dmux.r1tag = find_tag(read.sequence, params.tags, 'r1', 'regex', dmux.r1tag)
-        if dmux.r1tag.match:
-            dmux.r1 = read
-            #dmux.r1tag = forward
-            trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end + dmux.r1tag.offset)
-            if p:
-                print dmux.r1.identifier
-                print "regex forward: tag={0} seq={1} type={2} sequence={3}".format(dmux.r1tag.tag, dmux.r1tag.seq, dmux.r1tag.match_type, dmux.r1.sequence[:20])
-            #pdb.set_trace()
-            # remove the read from further consideration
-            pair.pop(index)
-            break
-    for index, read in enumerate(pair):
-        dmux.r2tag = find_tag(read.sequence, params.tags, 'r2', 'regex', dmux.r2tag)
-        if dmux.r2tag.match:
-            dmux.r2 = read
-            #dmux.r2tag = reverse
-            trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end + dmux.r2tag.offset)
-            if p:
-                print dmux.r2.identifier
-                print "regex reverse: tag={0} seq={1} type={2} sequence={3}".format(dmux.r2tag.tag, dmux.r2tag.seq, dmux.r2tag.match_type, dmux.r2.sequence[:20])
-            pair.pop(index)
-            break
-    if not dmux.r1tag.match:
-        for index, read in enumerate(pair):
-            dmux.r1tag = find_tag(read.sequence, params.tags, 'r1', 'fuzzy', dmux.r1tag)
-            if dmux.r1tag.match:
-                dmux.r1 = read
-                #dmux.r1tag = forward
-                trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end + dmux.r1tag.offset)
-                if p:
-                    print dmux.r1.identifier
-                    print "fuzzy forward: tag={0} seq={1} type={2} sequence={3}".format(dmux.r1tag.tag, dmux.r1tag.seq, dmux.r1tag.match_type, dmux.r1.sequence[:20])
-                #pdb.set_trace()
-                # remove the read from further consideration
-                pair.pop(index)
-                break
-    if not dmux.r2tag.match:
-        for index, read in enumerate(pair):
-            dmux.r2tag = find_tag(read.sequence, params.tags, 'r2', 'fuzzy', dmux.r2tag)
-            if dmux.r2tag.match:
-                dmux.r2 = read
-                #dmux.r2tag = reverse
-                trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end + dmux.r2tag.offset)
-                if p:
-                    print dmux.r2.identifier
-                    print "fuzzy reverse: tag={0} seq={1} type={2} sequence={3}".format(dmux.r2tag.tag, dmux.r2tag.seq, dmux.r2tag.match_type, dmux.r2.sequence[:20])
-                break
-    if p:
-        pdb.set_trace()
-    return dmux
-
-
-def get_cluster(params, tags):
-    tags.cluster_name = "{},{}".format(tags.f.seq, tags.r.seq)
-    tags.cluster = params.sequence_tags.cluster_map['None'][tags.cluster_name]
-    return tags
-
-
-def trim_tags_from_reads(read, start, end):
-    return read.slice(end, len(read.sequence), False)
-
-
-def find_which_reads_have_sites(params, dmux):
-    find_site(dmux.r1.sequence, params.site, 'r1', dmux.r1site)
-    if dmux.r1site.match:
-        trim_tags_from_reads(dmux.r1, dmux.r1site.start, dmux.r1site.end)
-    find_site(dmux.r2.sequence, params.site, 'r2', dmux.r2site)
-    if dmux.r2site.match:
-        trim_tags_from_reads(dmux.r2, dmux.r2site.start, dmux.r2site.end)
-    return dmux
-
-
-def split_and_check_reads(pair):
-    assert len(pair) == 2
-    r1, r2 = pair
-    identifiers = [i.identifier.split(' ')[0] for i in [r1, r2]]
-    # make sure fastq headers are the same
-    assert identifiers[0] == identifiers[1]
-    return r1, r2, identifiers[0]
-
-
-def find_overrun(seq, sites, read, result):
-    if read == 'r1':
-        site_group = sites['r1']
-    elif read == 'r2':
-        site_group = sites['r2']
-    for site in site_group:
-        match = site.regex.search(seq)
-        if match is not None:
-            result.match = True
-            # by default, this is true
-            assert match.groups()[0] == site.string
-            result.match_type = 'regex'
-            result.start, result.end = match.start(), match.end()
-            result.tag = site.string
-            result.seq = seq[result.start:result.end]
-            break
-    '''
-    if match is None and sites.fuzzy:
-        match = align(seq[:sites.max_site_length], site_group, sites.errors)
-        if match:
-            result.match = True
-            result.match_type = 'fuzzy'
-            result.tag = match.tag.string
-            result.seq = match.seq_span
-            result.start, result.end = get_align_match_position(match.seq_span, match.start, match.end)
-    '''
-    return result
-
-
-def find_which_reads_have_overruns(params, dmux):
-    p = params.overruns["{},{}".format(
-            dmux.r1tag.name,
-            dmux.r2tag.name
-            )
-        ]
-    find_overrun(dmux.r1.sequence, p, 'r1', dmux.r1overrun)
-    find_overrun(dmux.r2.sequence, p, 'r2', dmux.r2overrun)
-    # if we overrun on one read, we should always overrun on the opposite read,
-    # so only trim when this is True for both
-    if dmux.r1overrun.match == True and dmux.r2overrun.match == True:
-        dmux.r1.slice(0, dmux.r1overrun.start, False)
-        dmux.r2.slice(0, dmux.r2overrun.start, False)
-    return dmux
+def get_args():
+    """get arguments (config file location)"""
+    parser = argparse.ArgumentParser(description = "splitaake.py:  sequence " + \
+        "demultiplexing for hierarchically-tagged samples")
+    parser.add_argument('config', 
+            help="The input configuration file",
+            action=FullPaths
+        )
+    parser.add_argument('--job-size',
+            help="The job size to use",
+            type=int,
+            default=10000
+        )
+    return parser.parse_args()
 
 
 def singleproc(sequences, results, params, interval=1000, big_interval=10000):
@@ -251,22 +80,14 @@ def multiproc(jobs, results, params):
         singleproc(job, results, params)
 
 
-def split_every(n, iterable):
-    i = iter(iterable)
-    piece = list(islice(i, n))
-    while piece:
-        yield piece
-        piece = list(islice(i, n))
-
-
-def get_work(params):
+def get_work(params, job_size=10000):
     try:
         num_reads = get_sequence_count(params.reads.r1, 'fastq')
         reads1 = FastqReader(params.reads.r1)
         reads2 = FastqReader(params.reads.r2)
         if params.parallelism.cores > 1:
             merged = merge_fastq(reads1, reads2)
-            work = split_every(10000, merged)
+            work = split_every(job_size, merged)
         else:
             work = merge_fastq(reads1, reads2)
     except:
@@ -300,7 +121,7 @@ def main():
     print "[WARN] Dropping all demultiplexed reads ≤ {0} bp long".format(params.quality.drop_len)
     # get num reads and split up work
     print "Splitting reads into work units..."
-    num_reads, work = get_work(params)
+    num_reads, work = get_work(params, args.job_size)
     print "There are {:,d} reads".format(num_reads)
     # give some indication of progress for longer runs
     if num_reads > 999:
@@ -318,7 +139,7 @@ def main():
         print "Adding jobs to work queue..."
         for unit in work:
             jobs.put(unit)
-        print "There are {} jobs...".format(num_reads / 10000)
+        print "There are {} jobs...".format(num_reads / args.job_size)
         # setup the processes for the jobs
         print "Starting {} workers...".format(params.parallelism.cores)
         # start the worker processes
