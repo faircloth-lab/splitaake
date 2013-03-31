@@ -12,32 +12,93 @@ Description: core functions for demuxipy
 """
 
 
-#import os
 import sys
-#import re
 import gzip
-#import time
 import numpy
-#import string
-#import cPickle
-#import sqlite3
 import argparse
 import itertools
-#import ConfigParser
-
-#from multiprocessing import Process, Queue, JoinableQueue, cpu_count
-
-#from seqtools.sequence.fastq import FastqReader
-#from seqtools.sequence.fasta import FastaQualityReader
 from seqtools.sequence.transform import DNA_reverse_complement
 from jellyfish import levenshtein_distance as levenshtein
 
-#from demuxipy import db
 from splitaake import pairwise2
-
-from splitaake.lib2 import FullPaths, ListQueue, Tagged, Parameters
+from splitaake.config import FullPaths, ListQueue, Tagged, Parameters
 
 import pdb
+
+class AlignScore:
+    def __init__(self, allowed_errors):
+        self.tag = None
+        self.seq = None
+        self.score = 0
+        self.start = None
+        self.end = None
+        self.offset = 0
+        self.matches = 0
+        self.errors = None
+        self.allowed_errors = allowed_errors
+
+    def set(self, tag, seq_match, seq_span, score, start, end, match, errors, offset):
+        self.tag = tag
+        self.seq_match = seq_match
+        self.seq_span = seq_span
+        self.score = score
+        self.start = start
+        self.end = end
+        self.matches = match
+        self.errors = errors
+        self.offset = offset
+        
+class Demux:
+    '''Trimming, tag, and sequence data for individual reads'''
+    def __init__(self, identifier):
+        # super(Params, self).__init__()
+        #assert isinstance(sequence, FastaSequence), \
+        #    'The Record class must be instantiated with a FastaSequence object'
+        # a biopython sequence object
+        self.name = identifier
+        self.r1 = None
+        self.r2 = None
+        self.individual = None
+        self.drop = False
+        self.r1site = SeqSearchResult('site')
+        self.r2site = SeqSearchResult('site')
+        self.r1tag = SeqSearchResult('tag')
+        self.r2tag = SeqSearchResult('tag')
+        self.r1overrun = SeqSearchResult('overrun')
+        self.r2overrun = SeqSearchResult('overrun')
+
+    def __str__(self):
+        return "{0}({1})".format(self.__class__, self.name)
+
+    def __repr__(self):
+        return "<{0} instance at {1}>".format(self.__class__, hex(id(self)))
+
+
+class SeqSearchResult:
+    def __init__(self, typ):
+        self.type = typ
+        self.name = None
+        self.seq = None
+        self.tag = None
+        self.start = None
+        self.end = None
+        self.match = False
+        self.match_type = None
+
+    def __str__(self):
+        return "{0}({1})".format(self.__class__, self.__dict__['name'])
+
+    def __repr__(self):
+        return "<{0} instance at {1}>".format(self.__class__, hex(id(self)))
+
+    def reset(self):
+        self.name = None
+        self.seq = None
+        self.tag = None
+        self.start = None
+        self.end = None
+        self.match = False
+        self.match_type = None
 
 
 def motd():
@@ -74,29 +135,26 @@ def motd():
     print motd
 
 
-class AlignScore:
-    def __init__(self, allowed_errors):
-        self.tag = None
-        self.seq = None
-        self.score = 0
-        self.start = None
-        self.end = None
-        self.offset = 0
-        self.matches = 0
-        self.errors = None
-        self.allowed_errors = allowed_errors
+def merge_fastq(a, b):
+    for i, j in itertools.izip(a, b):
+        yield i, j
 
-    def set(self, tag, seq_match, seq_span, score, start, end, match, errors, offset):
-        self.tag = tag
-        self.seq_match = seq_match
-        self.seq_span = seq_span
-        self.score = score
-        self.start = start
-        self.end = end
-        self.matches = match
-        self.errors = errors
-        self.offset = offset
 
+def split_and_check_reads(pair):
+    assert len(pair) == 2
+    r1, r2 = pair
+    identifiers = [i.identifier.split(' ')[0] for i in [r1, r2]]
+    # make sure fastq headers are the same
+    assert identifiers[0] == identifiers[1]
+    return r1, r2, identifiers[0]
+
+
+def split_every(n, iterable):
+    i = iter(iterable)
+    piece = list(itertools.islice(i, n))
+    while piece:
+        yield piece
+        piece = list(itertools.islice(i, n))
 
 def matches(tag, seq_span, tag_span, allowed_errors):
     """Determine the gap/error counts for a particular match"""
@@ -182,6 +240,10 @@ def align(seq, tags, allowed_errors):
         return None
 
 
+def trim_tags_from_reads(read, start, end):
+    return read.slice(end, len(read.sequence), False)
+
+
 def get_align_match_position(seq_match_span, start, stop):
     # slice faster than ''.startswith()
     if seq_match_span[0] == '-':
@@ -190,6 +252,61 @@ def get_align_match_position(seq_match_span, start, stop):
         stop = stop - seq_match_span.count('-')
     return start, stop
 
+
+def find_which_reads_have_tags(params, r1, r2, dmux, p=False):
+    pair = [r1, r2]
+    for index, read in enumerate(pair):
+        dmux.r1tag = find_tag(read.sequence, params.tags, 'r1', 'regex', dmux.r1tag)
+        if dmux.r1tag.match:
+            dmux.r1 = read
+            #dmux.r1tag = forward
+            trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end + dmux.r1tag.offset)
+            if p:
+                print dmux.r1.identifier
+                print "regex forward: tag={0} seq={1} type={2} sequence={3}".format(dmux.r1tag.tag, dmux.r1tag.seq, dmux.r1tag.match_type, dmux.r1.sequence[:20])
+            #pdb.set_trace()
+            # remove the read from further consideration
+            pair.pop(index)
+            break
+    for index, read in enumerate(pair):
+        dmux.r2tag = find_tag(read.sequence, params.tags, 'r2', 'regex', dmux.r2tag)
+        if dmux.r2tag.match:
+            dmux.r2 = read
+            #dmux.r2tag = reverse
+            trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end + dmux.r2tag.offset)
+            if p:
+                print dmux.r2.identifier
+                print "regex reverse: tag={0} seq={1} type={2} sequence={3}".format(dmux.r2tag.tag, dmux.r2tag.seq, dmux.r2tag.match_type, dmux.r2.sequence[:20])
+            pair.pop(index)
+            break
+    if not dmux.r1tag.match:
+        for index, read in enumerate(pair):
+            dmux.r1tag = find_tag(read.sequence, params.tags, 'r1', 'fuzzy', dmux.r1tag)
+            if dmux.r1tag.match:
+                dmux.r1 = read
+                #dmux.r1tag = forward
+                trim_tags_from_reads(dmux.r1, dmux.r1tag.start, dmux.r1tag.end + dmux.r1tag.offset)
+                if p:
+                    print dmux.r1.identifier
+                    print "fuzzy forward: tag={0} seq={1} type={2} sequence={3}".format(dmux.r1tag.tag, dmux.r1tag.seq, dmux.r1tag.match_type, dmux.r1.sequence[:20])
+                #pdb.set_trace()
+                # remove the read from further consideration
+                pair.pop(index)
+                break
+    if not dmux.r2tag.match:
+        for index, read in enumerate(pair):
+            dmux.r2tag = find_tag(read.sequence, params.tags, 'r2', 'fuzzy', dmux.r2tag)
+            if dmux.r2tag.match:
+                dmux.r2 = read
+                #dmux.r2tag = reverse
+                trim_tags_from_reads(dmux.r2, dmux.r2tag.start, dmux.r2tag.end + dmux.r2tag.offset)
+                if p:
+                    print dmux.r2.identifier
+                    print "fuzzy reverse: tag={0} seq={1} type={2} sequence={3}".format(dmux.r2tag.tag, dmux.r2tag.seq, dmux.r2tag.match_type, dmux.r2.sequence[:20])
+                break
+    if p:
+        pdb.set_trace()
+    return dmux
 
 def find_tag(seq, tags, read, match_type, result):
     """Matching methods for left linker - regex first, followed by fuzzy (SW)
@@ -232,6 +349,16 @@ def find_tag(seq, tags, read, match_type, result):
     return result
 
 
+def find_which_reads_have_sites(params, dmux):
+    find_site(dmux.r1.sequence, params.site, 'r1', dmux.r1site)
+    if dmux.r1site.match:
+        trim_tags_from_reads(dmux.r1, dmux.r1site.start, dmux.r1site.end)
+    find_site(dmux.r2.sequence, params.site, 'r2', dmux.r2site)
+    if dmux.r2site.match:
+        trim_tags_from_reads(dmux.r2, dmux.r2site.start, dmux.r2site.end)
+    return dmux
+
+
 def find_site(seq, sites, read, result):
     if read == 'r1':
         site_group = sites.r1
@@ -259,139 +386,48 @@ def find_site(seq, sites, read, result):
     return result
 
 
-def trim_one(tagged, regexes, strings, buff, length, fuzzy, errors, trim=0):
-    """Remove the MID tag from the sequence read"""
-    #if sequence.id == 'MID_No_Error_ATACGACGTA':
-    #    pdb.set_trace()
-    #pdb.set_trace()
-    mid = find_left_tag(tagged.read.sequence,
-                regexes,
-                strings,
-                buff,
-                length,
-                fuzzy,
-                errors
+def find_which_reads_have_overruns(params, dmux):
+    p = params.overruns["{},{}".format(
+            dmux.r1tag.name,
+            dmux.r2tag.name
             )
-    if mid:
-        target, match_type, match = mid[0], mid[1], mid[4]
-        #tagged.mid, tagged.m_type, tagged.seq_match = mid[0],mid[1],mid[4]
-        tagged.read = tagged.read.slice(mid[3] + trim, len(tagged.read.sequence), False)
-        #tagged.mid_name = params.sequence_tags.reverse_mid_lookup[tagged.mid]
-        return tagged, target, match_type, match
-    else:
-        return tagged, None, None, None
+        ]
+    find_overrun(dmux.r1.sequence, p, 'r1', dmux.r1overrun)
+    find_overrun(dmux.r2.sequence, p, 'r2', dmux.r2overrun)
+    # if we overrun on one read, we should always overrun on the opposite read,
+    # so only trim when this is True for both
+    if dmux.r1overrun.match == True and dmux.r2overrun.match == True:
+        dmux.r1.slice(0, dmux.r1overrun.start, False)
+        dmux.r2.slice(0, dmux.r2overrun.start, False)
+    return dmux
 
-
-def trim_two(tagged, fregex, fstring, rregex, rstring, buff,
-        length, fuzzy, errors, trim = 0, revcomp = True):
-    """Use regular expression and (optionally) fuzzy string matching
-    to locate and trim linkers from sequences"""
-
-    left = find_left_tag(tagged.read.sequence,
-                fregex,
-                fstring,
-                buff,
-                length,
-                fuzzy,
-                errors
-            )
-    
-    right = find_right_tag(tagged.read.sequence,
-                rregex,
-                rstring,
-                buff,
-                length,
-                fuzzy,
-                errors,
-                tagged,
-                revcomp
-            )
-
-    # we can have 5 types of matches - tags on left and right sides,
-    # tags on left side only, tags on right side only, mismatching tags
-    # and no tags at all.  We take care of matching position (i,e. we
-    # want only matches at the ends) by regex and slicing in the
-    # search methods above.  If for some reason you want to check
-    # for concatemers, then turn that function on.
-
-    if left is not None \
-            and right is not None \
-            and left[0] == right[0]:
-        # trim the read
-        tagged.read = tagged.read.slice(left[3], right[2], False)
-        # left and right are identical so largely pass back the left
-        # info... except for m_type which can be a combination
-        target, match = left[0], left[4]
-        match_type = "{}-{}-both".format(left[1], right[1])
-
-    elif left is not None \
-            and right is not None\
-            and left[0] != right[0]:
-        # these are no good.  check for within gaps
-        # to make sure it's not a spurious match
-        #pdb.set_trace()
-        tagged.trimmed = None
-        target, match = None, None
-        match_type = "tag-mismatch"
-
-    elif right is None and left and left[2] <= buff:
-        tagged.read = tagged.read.slice(left[3], len(tagged.read.sequence), False)
-        target, match = left[0], left[4]
-        match_type = "{}-left".format(left[1])
-
-    elif left is None and right and right[2] >= (len(tagged.read.sequence) - (len(right[0]) + buff)):
-        tagged.read = tagged.read.slice(0, right[2], False)
-        target, match = right[0], right[4]
-        match_type = "{}-right".format(right[1])
-
-    else:
-        target, match_type, match = None, None, None
-
-    return tagged, target, match_type, match
-
-
-def concat_check(tagged, params):
-    """Check screened sequence for the presence of concatemers by scanning 
-    for all possible tags - after the 5' and 3' tags have been removed"""
-    s = tagged.read.sequence
-    m_type = None
-    #pdb.set_trace()
-    for tag in params.sequence_tags.all_tags[str(tagged.outer_seq)]['regex']:
-        match = tag.search(s)
-        if match:
-            tagged.concat_seq = tag.pattern
-            tagged.concat_type = "regex-concat"
-            tagged.concat_match = tagged.read.sequence[match.start():match.end()]
+def find_overrun(seq, sites, read, result):
+    if read == 'r1':
+        site_group = sites['r1']
+    elif read == 'r2':
+        site_group = sites['r2']
+    for site in site_group:
+        match = site.regex.search(seq)
+        if match is not None:
+            result.match = True
+            # by default, this is true
+            assert match.groups()[0] == site.string
+            result.match_type = 'regex'
+            result.start, result.end = match.start(), match.end()
+            result.tag = site.string
+            result.seq = seq[result.start:result.end]
             break
-    if match is None and params.concat_fuzzy:
-        match = align(s,
-                params.sequence_tags.all_tags[str(tagged.outer_seq)]['string'], 
-                params.concat_allowed_errors
-            )
+    '''
+    if match is None and sites.fuzzy:
+        match = align(seq[:sites.max_site_length], site_group, sites.errors)
         if match:
-            tagged.concat_seq = match[0]
-            tagged.concat_type = "fuzzy-concat"
-            tagged.concat_match = match[3]
-    return tagged
-
-
-def progress(count, interval, big_interval):
-    """give a rudimentary indication of progress"""
-    if count % big_interval == 0:
-        sys.stdout.write('%')
-        sys.stdout.flush()
-    elif count % interval == 0:
-        sys.stdout.write('.')
-        sys.stdout.flush()
-
-
-def get_args():
-    """get arguments (config file location)"""
-    parser = argparse.ArgumentParser(description = "splitaake.py:  sequence " + \
-        "demultiplexing for hierarchically-tagged samples")
-    parser.add_argument('config', help="The input configuration file",
-            action=FullPaths)
-    return parser.parse_args()
+            result.match = True
+            result.match_type = 'fuzzy'
+            result.tag = match.tag.string
+            result.seq = match.seq_span
+            result.start, result.end = get_align_match_position(match.seq_span, match.start, match.end)
+    '''
+    return result
 
 
 def get_sequence_count(input, kind):
@@ -403,7 +439,7 @@ def get_sequence_count(input, kind):
     else:
         return sum([1 for line in open(input, 'rU')]) / 4
 
-
+'''
 def split_fasta_reads_into_groups(reads, num_reads, num_procs):
     job_size = num_reads / num_procs
     print "Parsing reads into groups of {} reads".format(job_size)
@@ -412,8 +448,14 @@ def split_fasta_reads_into_groups(reads, num_reads, num_procs):
     while chunk:
         yield chunk
         chunk = list(itertools.islice(i, job_size))
+'''
 
 
-def merge_fastq(a, b):
-    for i, j in itertools.izip(a, b):
-        yield i, j
+def progress(count, interval, big_interval):
+    """give a rudimentary indication of progress"""
+    if count % big_interval == 0:
+        sys.stdout.write('%')
+        sys.stdout.flush()
+    elif count % interval == 0:
+        sys.stdout.write('.')
+        sys.stdout.flush()
