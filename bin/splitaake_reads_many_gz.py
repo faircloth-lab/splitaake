@@ -37,6 +37,7 @@ import ConfigParser
 from itertools import izip
 from seqtools.sequence import fastq
 from collections import defaultdict
+from splitaake.core import motd
 
 from jellyfish import levenshtein_distance as levenshtein
 from jellyfish import hamming_distance as hamming
@@ -194,6 +195,7 @@ def get_index(index, length):
 
 def main():
     """main loop"""
+    motd()
     args = get_args()
     # setup tags object
     tags = Tags(args.tagmap, args.section, args.no_correct)
