@@ -132,7 +132,8 @@ def change_read_num(sequence, read, index):
     return tuple(sl)
 
 
-def get_quality(string, ascii_min=33, ascii_max=126, quality_min=0, quality_max=93):
+def get_quality(string, min_accept, ascii_min=33, quality_min=0):
+    """return True if the min quality >= 5 and mean quality >= 20"""
     qa = numpy.fromstring(string, dtype='uint8')
     sanger = qa + ascii_min - quality_min
     # restrict to max
