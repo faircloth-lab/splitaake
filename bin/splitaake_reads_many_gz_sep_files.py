@@ -65,6 +65,7 @@ def get_args():
 
 
 class Tags:
+    """Tagging object to hold tag and tag mapping information"""
     def __init__(self, conf, section, no_correct=False):
         config = ConfigParser.ConfigParser()
         config.read(conf)
@@ -73,7 +74,7 @@ class Tags:
             nc = config.items('no correct')
             self.__get_no_correct_set(nc)
         else:
-            self.no_correct = None
+            self.no_correct = []
         self.__name_to_tag(tags)
         self.__tag_to_name()
         self.__get_min_length()
@@ -95,7 +96,7 @@ class Tags:
         if nc:
             self.no_correct = set([v for k, v in nc])
         else:
-            self.no_correct = None
+            self.no_correct = []
 
     def create_zip_files(self, pth):
         if not os.path.exists(pth):
