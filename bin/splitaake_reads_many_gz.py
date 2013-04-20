@@ -8,8 +8,24 @@ Copyright (c) 2012 Brant C. Faircloth. All rights reserved.
 Description: A quality-aware fastq file demultiplexer for 
 Illumina (Casava 1.8+) data that demultiplexes 
 Levenshtein/edit- distance sequence tags rather than using 
-Hamming distance (but can use Hamming distance, too).
+Hamming distance (but can use Hamming distance, too).  Works
+with gzip and uncompressed outputs from Casava in single or
+multiple files.
 
+Requires separate R1 (Read 1), R2 (Index read), R3 (Read 2)
+data as output from Casava when choosing not to demultiplex,
+e.g.:
+
+configureBclToFastq.pl \
+    --input-dir /your/path/to/run_folder/Data/Intensities/BaseCalls \
+    --output-dir /where/you/want/the/output \
+    --sample-sheet /my/path/to/run_folder/Data/Intensities/BaseCalls/SampleSheet.csv \
+    --use-bases-mask Y*,Y7,Y*
+
+When sample sheet looks like:
+
+FCID,Lane,SampleID,SampleRef,Index,Description,Control,Recipe,Operator,SampleProject
+D109LACXX,8,nodmux,,,No demultiplexing,N,D109LACXX,BCF,nodmux
 
 """
 
