@@ -119,6 +119,7 @@ class Tags:
 
 
 def change_read_num(sequence, read, index):
+    """update the reads with preferred header info giving index"""
     si = sequence[0].split(' ')
     sil = list(si[1])
     if read == 2:
