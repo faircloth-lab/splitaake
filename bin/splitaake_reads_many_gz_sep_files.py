@@ -160,51 +160,65 @@ def get_index(index, length):
     return idx, idx_qual
 
 def main():
+    """main loop"""
     args = get_args()
-    # setu tags object
+    # setup tags object
     tags = Tags(args.tagmap, args.section, args.no_correct)
     # create output files
     tags.create_zip_files(args.output)
     # vectorize the levenshtein function so we only call once per read
     distance = numpy.vectorize(levenshtein)
     read = 0
-    for f in glob.glob(os.path.join(args.r1, '*_R1_*')):
+    for f in glob.glob(os.path.join(args.reads, '*_R1_*')):
         print "Working on ", f
         read1 = fastq.FasterFastqReader(f)
         # get basename of R1 file
         read1_basename = os.path.basename(f)
-        index = fastq.FasterFastqReader(os.path.join(args.r1, read1_basename.replace('R1', 'R2')))
-        read2 = fastq.FasterFastqReader(os.path.join(args.r1, read1_basename.replace('R1', 'R3')))
+        index = fastq.FasterFastqReader(os.path.join(args.reads, read1_basename.replace('R1', 'R2')))
+        read2 = fastq.FasterFastqReader(os.path.join(args.reads, read1_basename.replace('R1', 'R3')))
         # read all of our files into fastq iterators
         for r1, i, r2 in izip(read1, index, read2):
-            if read % 10000 == 0:
-                print read
-            if i[0].split(' ')[1].split(':')[1] == 'N':
-                # get index sequence diff from tags
-                dist = distance(tags.seqs, i[2])
-                quality = get_quality(i[3])
+            if read % 100000 == 0:
+                print "{:,}".format(read)
+            if not filtered(r1):
+                # see if we need to trim the index
+                idx, idx_qual = get_index(i, args.tag_length)
+                # get index sequence differences from tags
+                dist = distance(tags.seqs, idx)
+                # get quality values
+                good_quality = get_quality(idx_qual, args.min_qual)
+                # find tags with 0 distance from other tags
                 positions = numpy.where(dist == 0)[0]
-                if positions is None and min(quality) >= 20 and i[2] not in tags.no_correct:
+                # if not a perfect match, check distance 1 matches
+                if positions.size == 0 and good_quality and idx not in tags.no_correct:
                     positions = numpy.where(dist == 1)[0]
-                if (positions is not None) and (len(positions) == 1) and min(quality) >= 20:
+                if positions.size == 1 and good_quality:
                     # assert headers match
                     assert r1[0].split(' ')[0] == r2[0].split(' ')[0], "Header mismatch"
                     # get tag for match
                     match = tags.seqs[positions[0]]
-                    # write to output
+                    # change header to add tag
                     r1 = change_read_num(r1, 1, match)
                     r2 = change_read_num(r2, 2, match)
+                    # write to output
                     tags.files[match][1].write(r1)
                     tags.files[match][2].write(r2)
+                # put low quality tags into their own file
+                elif (positions is not None) and (len(positions) == 1) and not good_quality:
+                    tags.files['lowqual'][1].write(r1)
+                    tags.files['lowqual'][2].write(i)
+                    tags.files['lowqual'][3].write(r2)
+                # put everything else into unknown
                 else:
-                    #pdb.set_trace()
                     tags.files['unknown'][1].write(r1)
                     tags.files['unknown'][2].write(i)
                     tags.files['unknown'][3].write(r2)
+            # if for some reason there are reads not passing filter,
+            # put those into unknown, too.
             else:
-                tags.files['lowqual'][1].write(r1)
-                tags.files['lowqual'][2].write(i)
-                tags.files['lowqual'][3].write(r2)
+                tags.files['unknown'][1].write(r1)
+                tags.files['unknown'][2].write(i)
+                tags.files['unknown'][3].write(r2)
             read += 1
         read1.close()
         index.close()
