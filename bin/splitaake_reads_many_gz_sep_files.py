@@ -27,18 +27,39 @@ import pdb
 
 def get_args():
     parser = argparse.ArgumentParser(description='demux')
-    parser.add_argument('r1', help='The input read1 fastq')
-    parser.add_argument('tagmap', help='A conf file mapping name:tag sequence')
-    parser.add_argument('output', help='The path to the output directory')
+    parser.add_argument('--reads', 
+        required = True,
+        help='The input fastq files'
+    )
+    parser.add_argument(
+        '--tagmap',
+        required = True,
+        help='A conf file mapping name:tag sequence'
+    )
+    parser.add_argument('--output',
+        required = True,
+        help='The path to the output directory'
+    )
     parser.add_argument('--section',
         default='tags',
-        help="If multisection conf, use this section")
+        help="If multisection conf, use this section"
+    )
     parser.add_argument('--no-correct',
         action='store_true',
         default=False,
         help="Do not correct certain tags " +
         "in the [no correct] section of the tagmap config file",
         )
+    parser.add_argument('--tag-length',
+        type=int,
+        default=None,
+        help="Length of tags if tags are < read length"
+    )
+    parser.add_argument('--min-qual',
+        type=int,
+        default=20,
+        help="The minimum average quality (Q) to accept (overall min Q must be >= 10)"
+    )
     args = parser.parse_args()
     return args
 
