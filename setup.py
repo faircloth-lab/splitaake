@@ -24,14 +24,12 @@ if __name__ == '__main__':
             'Programming Language :: Python',
             'Topic :: Scientific/Engineering :: Bio-Informatics',
              ],
-        requires=['numpy(>=1.3)','seqtools(>=0.5)'],
+        requires=['numpy(>=1.3)','seqtools(>=0.5)','jellyfish(>=0.2.0)'],
         long_description=open('README.rst').read(),
         scripts=[
                 'bin/splitaake_amplicons_or_rad.py',
                 'bin/splitaake_reads_many_gz_file.py',
-                'bin/splitaake_reads_single_gz_file.py',
                 'bin/splitaake_get_reads_from_db.py',
-                'bin/splitaake_reads_many_gz_sep_files.py',
             ],
         ext_modules=[
                 Extension(
