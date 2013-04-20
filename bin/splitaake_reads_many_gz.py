@@ -133,7 +133,7 @@ def change_read_num(sequence, read, index):
 
 
 def get_quality(string, min_accept, ascii_min=33, quality_min=0):
-    """return True if the min quality >= 5 and mean quality >= 20"""
+    """return True if the min quality >= 10 and mean quality >= 20"""
     qa = numpy.fromstring(string, dtype='uint8')
     sanger = qa - ascii_min + quality_min
     if min(sanger) >= 10 and numpy.mean(sanger) >= min_accept:
