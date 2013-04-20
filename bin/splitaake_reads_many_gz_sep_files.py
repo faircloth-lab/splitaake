@@ -135,10 +135,29 @@ def change_read_num(sequence, read, index):
 def get_quality(string, min_accept, ascii_min=33, quality_min=0):
     """return True if the min quality >= 5 and mean quality >= 20"""
     qa = numpy.fromstring(string, dtype='uint8')
-    sanger = qa + ascii_min - quality_min
-    # restrict to max
-    return sanger.clip(max=quality_max)
+    sanger = qa - ascii_min + quality_min
+    if min(sanger) >= 10 and numpy.mean(sanger) >= min_accept:
+        return True
+    else:
+        return False
 
+def filtered(read):
+    """Ensure we're skipping any reads that are filtered"""
+    if read[0].split(' ')[1].split(':')[1] == 'N':
+        return False
+    else:
+        return True
+
+def get_index(index, length):
+    """trim an index sequence down if the sequence used 
+    is shorter than the sequence converted from BCL"""
+    if length is not None:
+        idx = index[2][:length]
+        idx_qual = index[3][:length]
+    else:
+        idx = index[2]
+        idx_qual = index[3]
+    return idx, idx_qual
 
 def main():
     args = get_args()
