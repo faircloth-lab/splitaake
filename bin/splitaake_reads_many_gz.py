@@ -1,11 +1,15 @@
 """
-File: dmux.py
+File: splitaake_many_reads_gz.py
 Author: Brant Faircloth
 
 Created by Brant Faircloth on 08 February 2012 17:02 PST (-0800)
 Copyright (c) 2012 Brant C. Faircloth. All rights reserved.
 
-Description: 
+Description: A quality-aware fastq file demultiplexer for 
+Illumina (Casava 1.8+) data that demultiplexes 
+Levenshtein/edit- distance sequence tags rather than using 
+Hamming distance (but can use Hamming distance, too).
+
 
 """
 
@@ -65,6 +69,11 @@ def get_args():
         default=20,
         help="The minimum average quality (Q) to accept"
     )
+    parser.add_argument('--hamming',
+        action='store_true',
+        default=False,
+        help="Use the Hamming (substitution-only) distance",
+        )
     args = parser.parse_args()
     return args
 
@@ -146,12 +155,14 @@ def get_quality(string, min_accept, min_mean_accept, ascii_min=33, quality_min=0
     else:
         return False
 
+
 def filtered(read):
     """Ensure we're skipping any reads that are filtered"""
     if read[0].split(' ')[1].split(':')[1] == 'N':
         return False
     else:
         return True
+
 
 def get_index(index, length):
     """trim an index sequence down if the sequence used 
@@ -164,6 +175,7 @@ def get_index(index, length):
         idx_qual = index[3]
     return idx, idx_qual
 
+
 def main():
     """main loop"""
     args = get_args()
@@ -171,8 +183,12 @@ def main():
     tags = Tags(args.tagmap, args.section, args.no_correct)
     # create output files
     tags.create_zip_files(args.output)
-    # vectorize the levenshtein function so we only call once per read
-    distance = numpy.vectorize(levenshtein)
+    if not args.hamming:
+        # vectorize the levenshtein function so we only call once per read
+        distance = numpy.vectorize(levenshtein)
+    else:
+        # vectorize the hamming function so we only call once per read
+        distance = numpy.vectorize(hamming)
     read = 0
     for f in glob.glob(os.path.join(args.reads, '*_R1_*')):
         print "Working on ", f
