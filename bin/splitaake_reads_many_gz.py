@@ -57,8 +57,13 @@ def get_args():
     )
     parser.add_argument('--min-qual',
         type=int,
+        default=10,
+        help="The minimum single-base quality (Q) to accept"
+    )
+    parser.add_argument('--min-mean-qual',
+        type=int,
         default=20,
-        help="The minimum average quality (Q) to accept (overall min Q must be >= 10)"
+        help="The minimum average quality (Q) to accept"
     )
     args = parser.parse_args()
     return args
@@ -132,11 +137,11 @@ def change_read_num(sequence, read, index):
     return tuple(sl)
 
 
-def get_quality(string, min_accept, ascii_min=33, quality_min=0):
+def get_quality(string, min_accept, min_mean_accept, ascii_min=33, quality_min=0):
     """return True if the min quality >= 10 and mean quality >= 20"""
     qa = numpy.fromstring(string, dtype='uint8')
     sanger = qa - ascii_min + quality_min
-    if min(sanger) >= 10 and numpy.mean(sanger) >= min_accept:
+    if min(sanger) >= min_accept and numpy.mean(sanger) >= min_mean_accept:
         return True
     else:
         return False
@@ -186,7 +191,7 @@ def main():
                 # get index sequence differences from tags
                 dist = distance(tags.seqs, idx)
                 # get quality values
-                good_quality = get_quality(idx_qual, args.min_qual)
+                good_quality = get_quality(idx_qual, args.min_qual, args.min_mean_qual)
                 # find tags with 0 distance from other tags
                 positions = numpy.where(dist == 0)[0]
                 # if not a perfect match, check distance 1 matches
