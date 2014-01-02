@@ -37,14 +37,13 @@ import glob
 import numpy
 import ConfigParser
 from itertools import izip
-from splitaake.fastq import readfq, writefq
 from collections import defaultdict
-from splitaake.core import motd
 
 from jellyfish import levenshtein_distance as levenshtein
 from jellyfish import hamming_distance as hamming
 
-import pdb
+from splitaake.fastq import readfq, writefq
+from splitaake.core import motd
 
 
 class Tags:
