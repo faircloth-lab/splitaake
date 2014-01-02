@@ -12,11 +12,13 @@ Description: core functions for demuxipy
 """
 
 
+import os
 import sys
 import gzip
 import numpy
-import argparse
+import errno
 import itertools
+
 from seqtools.sequence.transform import DNA_reverse_complement
 from jellyfish import levenshtein_distance as levenshtein
 
@@ -24,6 +26,7 @@ from splitaake import pairwise2
 from splitaake.config import FullPaths, ListQueue, Tagged, Parameters
 
 import pdb
+
 
 class AlignScore:
     def __init__(self, allowed_errors):
@@ -47,7 +50,7 @@ class AlignScore:
         self.matches = match
         self.errors = errors
         self.offset = offset
-        
+
 class Demux:
     '''Trimming, tag, and sequence data for individual reads'''
     def __init__(self, identifier):
@@ -130,6 +133,16 @@ def motd():
     ###############################################################\n
     """
     print motd
+
+
+def mkdir_p(path):
+    try:
+        os.makedirs(path)
+    except OSError as exc:
+        if exc.errno == errno.EEXIST and os.path.isdir(path):
+            pass
+        else:
+            raise
 
 
 def merge_fastq(a, b):
