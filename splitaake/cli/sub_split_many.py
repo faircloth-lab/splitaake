@@ -77,10 +77,16 @@ def configure_parser(sub_parsers):
         action="store_true",
         default=False,
         help="Use the Hamming (substitution-only) distance",
-        )
+    )
+    sp.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Run in quiet mode",
+    )
 
-    sp.set_defaults(func=run_abyss_assembly)
+    sp.set_defaults(func=split_many_reads)
 
 
-def run_abyss_assembly(args, parser):
-    abyss.main(args, parser)
+def split_many_reads(args, parser):
+    many.main(args, parser)

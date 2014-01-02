@@ -32,16 +32,19 @@ D109LACXX,8,nodmux,,,No demultiplexing,N,D109LACXX,BCF,nodmux
 
 
 import os
+import gzip
 import glob
 import numpy
 import ConfigParser
 from itertools import izip
-from seqtools.sequence import fastq
+from splitaake.fastq import readfq, writefq
 from collections import defaultdict
 from splitaake.core import motd
 
 from jellyfish import levenshtein_distance as levenshtein
 from jellyfish import hamming_distance as hamming
+
+import pdb
 
 
 class Tags:
@@ -78,6 +81,9 @@ class Tags:
         else:
             self.no_correct = []
 
+    def __open_zip_file(self, pth):
+        return gzip.open(pth, 'wb')
+
     def create_zip_files(self, pth):
         if not os.path.exists(pth):
             os.makedirs(pth)
@@ -85,18 +91,17 @@ class Tags:
         for name, seq in self.name_dict.iteritems():
             for i in [1, 2]:
                 r = "{0}_R{1}.fastq.gz".format(name, i)
-                self.files[seq][i] = fastq.FasterFastqWriter(
+                self.files[seq][i] = self.__open_zip_file(
                     os.path.join(pth, r)
                 )
         for name in ['unknown', 'lowqual']:
             for i in [1, 2, 3]:
                 r = "{0}-R{1}.fastq.gz".format(name, i)
-                self.files[name][i] = fastq.FasterFastqWriter(
+                self.files[name][i] = self.__open_zip_file(
                     os.path.join(pth, r)
                 )
 
     def close_zip_files(self):
-        #pdb.set_trace()
         for f in self.files.values():
             for i in [1, 2]:
                 f[i].close()
@@ -129,27 +134,54 @@ def get_quality(string, min_accept, min_mean_accept, ascii_min=33,
 
 def filtered(read):
     """Ensure we're skipping any reads that are filtered"""
-    if read[0].split(' ')[1].split(':')[1] == 'N':
-        return False
-    else:
-        return True
+    try:
+        if read[0].split(' ')[1].split(':')[1] == 'N':
+            return False
+        else:
+            return True
+    except IndexError as e:
+        if e.message == 'list index out of range':
+            # raise warning in log
+            return False
 
 
 def get_index(index, length):
     """trim an index sequence down if the sequence used
     is shorter than the sequence converted from BCL"""
     if length is not None:
-        idx = index[2][:length]
-        idx_qual = index[3][:length]
+        idx = index[1][:length]
+        idx_qual = index[2][:length]
     else:
-        idx = index[2]
-        idx_qual = index[3]
+        idx = index[1]
+        idx_qual = index[2]
     return idx, idx_qual
+
+
+def read_fastq(file):
+    if os.path.splitext(file)[1] == ".gz":
+        infile = gzip.open(file, "rU")
+    elif os.path.splitext(file)[1] == ".fastq":
+        infile = open(file, "rU")
+    else:
+        raise IOError("The files don't appear to be *.fastq or *.fastq.gz")
+    return readfq(infile)
+
+
+def write_to_r1_and_r2(tags, match, r1, r2):
+    writefq(tags.files[match][1], r1)
+    writefq(tags.files[match][2], r2)
+
+
+def write_to_unk(tags, fset, r1, i, r2):
+    writefq(tags.files[fset][1], r1)
+    writefq(tags.files[fset][2], i)
+    writefq(tags.files[fset][3], r2)
 
 
 def main(args, parser):
     """main loop"""
-    motd()
+    if not args.quiet:
+        motd()
     # setup tags object
     tags = Tags(args.tagmap, args.section, args.no_correct)
     # create output files
@@ -162,22 +194,22 @@ def main(args, parser):
         distance = numpy.vectorize(hamming)
     read = 0
     for f in glob.glob(os.path.join(args.reads, '*_R1_*')):
-        print "Working on ", f
-        read1 = fastq.FasterFastqReader(f)
+        read1 = read_fastq(f)
         # get basename of R1 file
         read1_basename = os.path.basename(f)
-        index = fastq.FasterFastqReader(os.path.join(
+        index = read_fastq(os.path.join(
             args.reads,
             read1_basename.replace('R1', 'R2')
         ))
-        read2 = fastq.FasterFastqReader(os.path.join(
+        read2 = read_fastq(os.path.join(
             args.reads,
             read1_basename.replace('R1', 'R3')
         ))
         # read all of our files into fastq iterators
         for r1, i, r2 in izip(read1, index, read2):
-            if read % 100000 == 0:
-                print "{:,}".format(read)
+            if not args.quiet:
+                if read % 100000 == 0:
+                    print "{:,}".format(read)
             if not filtered(r1):
                 # see if we need to trim the index
                 idx, idx_qual = get_index(i, args.tag_length)
@@ -197,34 +229,30 @@ def main(args, parser):
                     positions = numpy.where(dist == 1)[0]
                 if positions.size == 1 and good_quality:
                     # assert headers match
-                    assert r1[0].split(' ')[0] == r2[0].split(' ')[0], "Header mismatch"
+                    try:
+                        assert r1[0].split(' ')[0] == r2[0].split(' ')[0]
+                    except:
+                        raise IOError("Mismatch between R1 and R2 headers")
                     # get tag for match
                     match = tags.seqs[positions[0]]
                     # change header to add tag
                     r1 = change_read_num(r1, 1, match)
                     r2 = change_read_num(r2, 2, match)
                     # write to output
-                    tags.files[match][1].write(r1)
-                    tags.files[match][2].write(r2)
+                    write_to_r1_and_r2(tags, match, r1, r2)
                 # put low quality tags into their own file
                 elif ((positions is not None) and (len(positions) == 1) and
                       not good_quality):
-                    tags.files['lowqual'][1].write(r1)
-                    tags.files['lowqual'][2].write(i)
-                    tags.files['lowqual'][3].write(r2)
+                    write_to_unk(tags, 'lowqual', r1, i, r2)
                 # put everything else into unknown
                 else:
-                    tags.files['unknown'][1].write(r1)
-                    tags.files['unknown'][2].write(i)
-                    tags.files['unknown'][3].write(r2)
+                    write_to_unk(tags, 'unknown', r1, i, r2)
             # if for some reason there are reads not passing filter,
             # put those into unknown, too.
             else:
-                tags.files['unknown'][1].write(r1)
-                tags.files['unknown'][2].write(i)
-                tags.files['unknown'][3].write(r2)
+                write_to_unk(tags, 'unknown', r1, i, r2)
             read += 1
-        read1.close()
-        index.close()
-        read2.close()
+        # close the input read files
+        for f in [read1, index, read2]:
+            f.close()
     tags.close_zip_files()

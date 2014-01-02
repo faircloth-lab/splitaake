@@ -17,7 +17,7 @@ import sys
 from splitaake.cli import sub_split_many
 
 
-descr = "Split many files of gzip reads."
+descr = "Split files of gzip reads."
 
 
 def configure_parser(sub_parsers):
