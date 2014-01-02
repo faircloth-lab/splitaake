@@ -19,11 +19,9 @@ import numpy
 import errno
 import itertools
 
-from seqtools.sequence.transform import DNA_reverse_complement
 from jellyfish import levenshtein_distance as levenshtein
 
 from splitaake import pairwise2
-from splitaake.config import FullPaths, ListQueue, Tagged, Parameters
 
 import pdb
 
@@ -50,6 +48,7 @@ class AlignScore:
         self.matches = match
         self.errors = errors
         self.offset = offset
+
 
 class Demux:
     '''Trimming, tag, and sequence data for individual reads'''
@@ -165,6 +164,7 @@ def split_every(n, iterable):
     while piece:
         yield piece
         piece = list(itertools.islice(i, n))
+
 
 def matches(tag, seq_span, tag_span, allowed_errors):
     """Determine the gap/error counts for a particular match"""
@@ -317,6 +317,7 @@ def find_which_reads_have_tags(params, r1, r2, dmux, p=False):
     if p:
         pdb.set_trace()
     return dmux
+
 
 def find_tag(seq, tags, read, match_type, result):
     """Matching methods for left linker - regex first, followed by fuzzy (SW)
