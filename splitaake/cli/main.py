@@ -16,10 +16,10 @@ import sys
 import argparse
 
 from splitaake.cli import main_help
-#from phyluce.cli import main_amplicon
+from splitaake.cli import main_split
 #from phyluce.cli import main_rad
-#from phyluce.cli import main_split
-#from phyluce.cli import main_db
+#from phyluce.cli import main_amplicon
+#from phyluce.cli import main_database
 
 
 def main():
@@ -44,6 +44,7 @@ def main():
     )
 
     main_help.configure_parser(sub_parsers)
+    main_split.configure_parser(sub_parsers)
 
     try:
         import argcomplete
