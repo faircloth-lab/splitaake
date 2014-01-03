@@ -53,10 +53,12 @@ class ConfParallelism:
         self.multiprocessing = conf.getboolean('Multiprocessing', 'multiprocessing')
         if self.multiprocessing:
             cores = conf.get('Multiprocessing', 'cores')
-            if cores.isdigit() and int(cores) <= cpu_count():
-                self.cores = int(cores)
-            elif cores == 'auto':
+            if cores == 'auto':
                 self.cores = cpu_count() - 1
+            elif cores.isdigit() and int(cores) <= cpu_count():
+                self.cores = int(cores)
+            elif cores.isdigit() and int(cores) >= cpu_count():
+                raise ValueError("You have specified more CPU cores than you have")
             else:
                 raise ValueError("[Multiprocessing] CORES must be an integer or 'auto'")
         else:
