@@ -186,6 +186,22 @@ class TestTags:
         assert test_tags.combo_lookup('p1', 'n1') == 'combo1'
         assert test_tags.combo_lookup('p1', 'n2') == 'combo2'
         assert test_tags.combo_lookup('n1', 'p1') == 'combo3'
+
+
+class TestTagMeta:
+    def test_normal_tag_meta(self):
+        p = config.TagMeta('n4', 'ACTGtagc', 'TagSequences')
+        assert p.name == 'n4'
+        assert p.string == 'ACTGtagc'
+        assert p.string_len == 8
+        assert p.five_p == ''
+        assert p.tag == 'ACTG'
+        assert p.three_p == 'tagc'
+        assert p.tag_len == 4
+        assert p.regex.pattern == '^(ACTG)t?a?g?c?'
+        assert p.five_p_start is None
+        #pdb.set_trace()
+
 '''
 @pytest.fixture(scope="module")
 def p(conf_file):
