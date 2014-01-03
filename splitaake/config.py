@@ -30,6 +30,11 @@ class FullPaths(argparse.Action):
         setattr(namespace, self.dest, os.path.abspath(os.path.expanduser(values)))
 
 
+class ConfigurationError(Exception):
+    def __init__(self, message):
+        Exception.__init__(self, message)
+
+
 class ListQueue(list):
     def __init__(self):
         list.__init__(self)
@@ -43,74 +48,136 @@ class ListQueue(list):
         return self.pop()
 
 
-class ConfParallelism:
-    def __init__(self, conf):
+class Parallelism:
+    def __init__(self, *args):
         self.multiprocessing = None
         self.cores = None
-        self._get_mp_values(conf)
+        if isinstance(args[0], ConfigParser.ConfigParser):
+            self.get_conf_values(args[0])
+            self.check_values()
+        else:
+            self.get_manual_values(args)
+            self.check_values()
 
-    def _get_mp_values(self, conf):
-        self.multiprocessing = conf.getboolean('Multiprocessing', 'multiprocessing')
+    def get_conf_values(self, conf):
+        self.multiprocessing = conf.getboolean(
+            'Multiprocessing',
+            'multiprocessing'
+        )
+
         if self.multiprocessing:
-            cores = conf.get('Multiprocessing', 'cores')
-            if cores == 'auto':
-                self.cores = cpu_count() - 1
-            elif cores.isdigit() and int(cores) <= cpu_count():
-                self.cores = int(cores)
-            elif cores.isdigit() and int(cores) >= cpu_count():
-                raise ValueError("You have specified more CPU cores than you have")
-            else:
-                raise ValueError("[Multiprocessing] CORES must be an integer or 'auto'")
+            self.cores = conf.get(
+                'Multiprocessing',
+                'cores'
+            )
         else:
             self.cores = 1
 
+    def get_manual_values(self, args):
+        self.multiprocessing = args[0]
+        self.cores = args[1]
 
-class ConfDb:
-    def __init__(self, conf):
+    def check_values(self):
+        if isinstance(self.cores, str):
+            if self.cores == 'auto':
+                self.cores = cpu_count() - 1
+            elif self.cores.isdigit():
+                self.cores = int(self.cores)
+        elif isinstance(self.cores, int):
+            self.cores = self.cores
+        if self.multiprocessing and self.cores is None:
+            raise ConfigurationError("[Multiprocessing] You have specified "
+                                     "multiprocessing but no number of cores "
+                                     "[or 'auto']")
+        try:
+            assert self.cores <= cpu_count()
+        except:
+            raise ConfigurationError("[Multiprocessing] You have specified "
+                                     "more compute cores than you have")
+
+
+class Db:
+    def __init__(self, *args):
         self.create = None
         self.name = None
-        self._get_db_values(conf)
+        if isinstance(args[0], ConfigParser.ConfigParser):
+            self.get_conf_values(args[0])
+            self.check_values()
+        else:
+            self.get_manual_values(args)
+            self.check_values()
 
-    def _get_db_values(self, conf):
-        self.create = conf.getboolean('Database', 'database')
+    def get_conf_values(self, conf):
+        self.create = conf.getboolean(
+            'Database',
+            'database'
+        )
         if self.create:
-            name = conf.get('Database', 'name').strip("'")
-            if name == '':
-                raise ValueError("[Database] NAME must be specified")
-            else:
-                self.name = os.path.abspath(os.path.expanduser(name))
+            self.name = conf.get('Database', 'name').strip("'")
+
+    def get_manual_values(self, args):
+        self.create = args[0]
+        self.name = args[1]
+
+    def check_values(self):
+        if self.name is None or self.name == '':
+            raise ConfigurationError("[Database] NAME must be specified")
+        else:
+            self.name = os.path.abspath(os.path.expanduser(self.name))
 
 
-class ConfReads:
-    def __init__(self, conf):
+class Reads:
+    def __init__(self, *args):
         self.r1 = None
         self.r2 = None
-        self._get_r1_and_r2(conf)
+        if isinstance(args[0], ConfigParser.ConfigParser):
+            self.get_conf_r1_and_r2(args[0])
+        else:
+            self.get_manual_r1_and_r2(args)
+            self.check_values()
 
-    def _get_r1_and_r2(self, conf):
-        for pos, file in enumerate([conf.get('Sequence', 'r1'), conf.get('Sequence', 'r2')]):
-            self._check_and_get_path(pos, file)
+    def get_conf_r1_and_r2(self, conf):
+        sequence_data = [
+            conf.get('Sequence', 'r1'),
+            conf.get('Sequence', 'r2')
+        ]
+        for pos, file in enumerate(sequence_data):
+            self.check_and_get_path(pos, file)
 
-    def _check_and_get_path(self, pos, file):
+    def get_manual_r1_and_r2(self, args):
+        sequence_data = [
+            args[0],
+            args[1]
+        ]
+        for pos, file in enumerate(sequence_data):
+            self.check_and_get_path(pos, file)
+
+    def check_and_get_path(self, pos, file):
         fullpath = os.path.abspath(os.path.expanduser(file.strip("'")))
         try:
             assert os.path.isfile(fullpath)
         except:
-            raise IOError("File {0} does not exist".format(file))
+            raise IOError("[Sequence] File {0} does not exist.".format(file))
         if pos == 0:
             self.r1 = fullpath
         else:
             self.r2 = fullpath
 
 
-class ConfQuality:
-    def __init__(self, conf):
+class Quality:
+    def __init__(self, *args):
         self.trim = None
         self.min = None
         self.drop_n = None
-        self._get_quality_values(conf)
+        self.drop_len = None
+        if isinstance(args[0], ConfigParser.ConfigParser):
+            self.get_conf_quality_values(args[0])
+            self.check_values()
+        else:
+            self.get_manual_quality_values(args)
+            self.check_values()
 
-    def _get_quality_values(self, conf):
+    def get_conf_quality_values(self, conf):
         self.trim = conf.getboolean('QualitySetup', 'trim')
         self.dropn = conf.getboolean('QualitySetup', 'dropn')
         self.min = conf.getint('QualitySetup', 'min')
@@ -119,57 +186,102 @@ class ConfQuality:
         except:
             self.drop_len = 1
 
+    def get_manual_quality_values(self, args):
+        self.trim = args[0]
+        self.dropn = args[1]
+        self.min = args[2]
+        self.drop_len = args[3]
 
-class ConfTag:
-    def __init__(self, conf):
+    def check_values(self):
+        try:
+            assert 0 <= self.min <= 93
+        except:
+            raise ConfigurationError("[Quality] Min quality must be "
+                                     "0 <= min <= 93.")
+
+
+class Tags:
+    def __init__(self, *args):
         self.type = None
         self.five_p_buffer = None
         self.three_p_buffer = None
         self.three_p_orient = None
         self.fuzzy = None
         self.errors = None
+        if isinstance(args[0], ConfigParser.ConfigParser):
+            self.get_tag_values(args[0])
+            combos = args[0].items('Combinations')
+            tags = args[0].items('TagSequences')
+            self.check_values()
+            self.build(combos, tags)
+        else:
+            self.get_manual_tag_values(args)
+            self.check_values()
 
-        self._get_tag_values(conf)
-        self._get_combinations(conf)
-        self._get_sequences(conf)
+    def build(self, combos, tags):
+        self._get_combinations(combos)
+        self._get_sequences(tags)
         self._get_reverse_sequences()
         self._get_r1_tags()
         self._get_r2_tags()
         #self._get_five_p_overrun(conf)
         #self._get_three_p_overrun(conf)
 
-    def _get_tag_values(self, conf):
+    def get_tag_values(self, conf):
         self.fuzzy = conf.getboolean('TagSetup', 'FuzzyMatching')
         if self.fuzzy:
             self.errors = conf.getint('TagSetup', 'AllowedErrors')
         else:
             self.errors = 0
-        self.three_p_orient = conf.get('TagSetup', 'ThreePrimeOrientation').lower()
+        self.three_p_orient = conf.get(
+            'TagSetup',
+            'ThreePrimeOrientation').lower()
+
+    def get_manual_tag_values(self, args):
+        self.fuzzy = args[0]
+        self.errors = args[1]
+        self.three_p_orient = args[2]
+
+    def check_values(self):
         try:
             assert self.three_p_orient in ['forward', 'reverse']
         except:
-            raise ValueError("[TagSetup] ThreePrimeOrientation must be 'Forward' or 'Reverse'")
+            raise ConfigurationError("[TagSetup] ThreePrimeOrientation must "
+                                     "be 'Forward' or 'Reverse'")
 
-    def _get_combinations(self, conf):
-        self.name_d = dict(conf.items('Combinations'))
+    def _get_combinations(self, combos):
+        self.name_d = dict(combos)
 
-    def _get_sequences(self, conf):
-        self.seq_d = dict(conf.items('TagSequences'))
+    def _get_sequences(self, tags):
+        self.seq_d = dict(tags)
         self.max_tag_length = max([len(v) for k, v in self.seq_d.iteritems()])
 
     def _get_reverse_sequences(self):
         self.rev_seq_d = {v: k for k, v in self.seq_d.iteritems()}
 
+    def _get_r1_tag_names(self):
+        return set([k.split(',')[0] for k in self.name_d.keys()])
+
+    def _get_r2_tag_names(self):
+        return set([k.split(',')[1] for k in self.name_d.keys()])
+
+    def _get_read_tag_dicts(self, tag_names):
+        return {k: v for k, v in self.seq_d.iteritems() if k in tag_names}
+
+    def _get_r2_tag_d(self, r2_tag_names):
+        return {k: v for k, v in self.seq_d.iteritems() if k in r2_tag_names}
+
     def _get_r1_tags(self):
         # make sure we reduce set to only uniques
-        r1_tag_names = set([k.split(',')[0] for k in self.name_d.keys()])
-        r1_tag_d = {k: v for k, v in self.seq_d.iteritems() if k in r1_tag_names}
+        r1_tag_names = self._get_r1_tag_names()
+        r1_tag_d = self._get_read_tag_dicts(r1_tag_names)
+        #pdb.set_trace()
         self.r1 = [TagMeta(k, v, 'TagSetup') for k, v in r1_tag_d.iteritems()]
 
     def _get_r2_tags(self):
         # make sure we reduce set to only uniques
-        r2_tag_names = set([k.split(',')[1] for k in self.name_d.keys()])
-        r2_tag_d = {k: v for k, v in self.seq_d.iteritems() if k in r2_tag_names}
+        r2_tag_names = self._get_r2_tag_names()
+        r2_tag_d = self._get_read_tag_dicts(r2_tag_names)
         self.r2 = [TagMeta(k, v, 'TagSetup') for k, v in r2_tag_d.iteritems()]
 
     def name_lookup(self, tag):
@@ -181,9 +293,7 @@ class ConfTag:
 
 class TagMeta:
     def __init__(self, name, string, section):
-        nucleotides = set(list('ACGTacgt'))
-        for base in string:
-            assert base in nucleotides, ValueError("[{0}] Foward/Reverse bases must be in the alphabet [ACGTacgt]".format(section))
+        self._check_bases(string)
         self.name = name
         self.string = string
         self._get_tag_parts()
@@ -191,12 +301,25 @@ class TagMeta:
         self.tag_len = len(self.tag)
         wild_five = ''.join(['{}?'.format(i) for i in self.five_p])
         wild_three = ''.join(['{}?'.format(i) for i in self.three_p])
-        self.regex = re.compile('^{0}({1}){2}'.format(wild_five, self.tag, wild_three), re.IGNORECASE)
+        self.regex = re.compile(
+            '^{0}({1}){2}'.format(wild_five, self.tag, wild_three),
+            re.IGNORECASE
+        )
         if self.five_p != '':
-            self.five_p_start = re.compile('^{0}+'.format('*'.join(list(self.five_p)), re.IGNORECASE))
+            temp_format = '^{0}+'.format('*'.join(list(self.five_p)))
+            self.five_p_start = re.compile(temp_format, re.IGNORECASE)
         else:
             self.five_p_start = None
         #pdb.set_trace()
+
+    def _check_bases(self, string):
+        nucleotides = set(list('ACGTacgt'))
+        for base in string:
+            try:
+                assert base in nucleotides
+            except:
+                raise ValueError("[{0}] Foward/Reverse bases must be in the "
+                                 "alphabet [ACGTacgt]".format(section))
 
     def _get_tag_parts(self):
         regex = re.compile('^([acgt]*)([ACGT]+)([acgt]*)$')
