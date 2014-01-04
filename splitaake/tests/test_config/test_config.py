@@ -142,18 +142,20 @@ class TestTags:
 
     def test_get_sequences(self, test_tags):
         assert test_tags.seq_d == {
-            'p1': 'TTTT',
-            'n1': 'GGGG',
-            'n2': 'AAAA'
+            'p1': 'TTTTtt',
+            'n1': 'GGGGgg',
+            'n2': 'AAAAaa'
         }
-        assert test_tags.max_tag_length == 4
+
+    def test_get_max_tag_length(self, test_tags):
+        assert test_tags.max_tag_length == 6
 
     def test_get_reverse_sequences(self, test_tags):
         test_tags._get_reverse_sequences()
         assert test_tags.rev_seq_d == {
-            'TTTT': 'p1',
-            'GGGG': 'n1',
-            'AAAA': 'n2'
+            'TTTTtt': 'p1',
+            'GGGGgg': 'n1',
+            'AAAAaa': 'n2'
         }
 
     def test_get_r1_tag_name(self, test_tags):
@@ -162,8 +164,8 @@ class TestTags:
     def test_get_r1_tag_d(self, test_tags):
         faux = set(['n1', 'p1'])
         assert test_tags._get_read_tag_dicts(faux) == {
-            'n1': 'GGGG',
-            'p1': 'TTTT'
+            'n1': 'GGGGgg',
+            'p1': 'TTTTtt'
         }
 
     def test_get_r2_tag_name(self, test_tags):
@@ -172,15 +174,41 @@ class TestTags:
     def test_get_r2_tag_d(self, test_tags):
         faux = set(['n1', 'n2', 'p1'])
         assert test_tags._get_read_tag_dicts(faux) == {
-            'n1': 'GGGG',
-            'n2': 'AAAA',
-            'p1': 'TTTT'
+            'n1': 'GGGGgg',
+            'n2': 'AAAAaa',
+            'p1': 'TTTTtt'
         }
 
+    def test_get_r1_tags(self, test_tags):
+        test_tags._get_r1_tags()
+        assert len(test_tags.r1) == 2
+        assert test_tags.r1[0].five_p == ''
+        assert test_tags.r1[0].five_p_start is None
+        assert test_tags.r1[0].name == 'n1'
+        assert test_tags.r1[0].regex.pattern == '^(GGGG)g?g?'
+        assert test_tags.r1[0].string == 'GGGGgg'
+        assert test_tags.r1[0].string_len == 6
+        assert test_tags.r1[0].tag == 'GGGG'
+        assert test_tags.r1[0].tag_len == 4
+        assert test_tags.r1[0].three_p == 'gg'
+
+    def test_get_r2_tags(self, test_tags):
+        test_tags._get_r2_tags()
+        assert len(test_tags.r2) == 3
+        assert test_tags.r2[2].five_p == ''
+        assert test_tags.r2[2].five_p_start is None
+        assert test_tags.r2[2].name == 'p1'
+        assert test_tags.r2[2].regex.pattern == '^(TTTT)t?t?'
+        assert test_tags.r2[2].string == 'TTTTtt'
+        assert test_tags.r2[2].string_len == 6
+        assert test_tags.r2[2].tag == 'TTTT'
+        assert test_tags.r2[2].tag_len == 4
+        assert test_tags.r2[2].three_p == 'tt'
+
     def test_name_lookup(self, test_tags):
-        assert test_tags.name_lookup('TTTT') == 'p1'
-        assert test_tags.name_lookup('GGGG') == 'n1'
-        assert test_tags.name_lookup('AAAA') == 'n2'
+        assert test_tags.name_lookup('TTTTtt') == 'p1'
+        assert test_tags.name_lookup('GGGGgg') == 'n1'
+        assert test_tags.name_lookup('AAAAaa') == 'n2'
 
     def test_combo_lookup(self, test_tags):
         assert test_tags.combo_lookup('p1', 'n1') == 'combo1'
@@ -189,7 +217,7 @@ class TestTags:
 
 
 class TestTagMeta:
-    def test_normal_tag_meta(self):
+    def test_normal_tag_meta_1(self):
         p = config.TagMeta('n4', 'ACTGtagc', 'TagSequences')
         assert p.name == 'n4'
         assert p.string == 'ACTGtagc'
@@ -200,6 +228,60 @@ class TestTagMeta:
         assert p.tag_len == 4
         assert p.regex.pattern == '^(ACTG)t?a?g?c?'
         assert p.five_p_start is None
+
+    def test_get_tag_parts_1(self):
+        p = config.TagMeta('test1', 'ggggTTTTaaaa', 'TestTags', auto=False)
+        p._get_tag_parts('TestTags')
+        assert p.five_p == 'gggg'
+        assert p.tag == 'TTTT'
+        assert p.three_p == 'aaaa'
+        assert p.tag_len == 4
+
+    def test_get_tag_parts_2(self):
+        section = 'TestTags'
+        p = config.TagMeta('test1', 'ggggTtTTTTTaaaa', section, auto=False)
+        with pytest.raises(config.ConfigurationError) as excinfo:
+            p._get_tag_parts('TestTags')
+            assert excinfo.value == ("[{}] The tags are not structured "
+                                     "correctly".format(section))
+
+    def test_get_tag_parts_3(self):
+        section = 'TestTags'
+        p = config.TagMeta('test1', 'GgggTtTTTTTaaaa', section, auto=False)
+        with pytest.raises(config.ConfigurationError) as excinfo:
+            p._get_tag_parts('TestTags')
+            assert excinfo.value == ("[{}] The tags are not structured "
+                                     "correctly".format(section))
+
+    def test_get_tag_parts_4(self):
+        section = 'TestTags'
+        p = config.TagMeta('test1', 'GgggTtTTTTTaaaAA', section, auto=False)
+        with pytest.raises(config.ConfigurationError) as excinfo:
+            p._get_tag_parts('TestTags')
+            assert excinfo.value == ("[{}] The tags are not structured "
+                                     "correctly".format(section))
+
+    def test_get_tag_wildcards_1(self):
+        p = config.TagMeta('test1', 'ggggTTTTaaaa', 'TestTags', auto=False)
+        p._get_tag_parts('TestTags')
+        p._get_tag_wildcards()
+        assert p.regex.pattern == '^g?g?g?g?(TTTT)a?a?a?a?'
+        assert p.five_p_start.pattern == '^g*g*g*g+'
+
+    def test_get_tag_wildcards_2(self):
+        p = config.TagMeta('test1', 'TTTTaaaa', 'TestTags', auto=False)
+        p._get_tag_parts('TestTags')
+        p._get_tag_wildcards()
+        assert p.regex.pattern == '^(TTTT)a?a?a?a?'
+        assert p.five_p_start is None
+
+    def test_get_tag_wildcards_3(self):
+        p = config.TagMeta('test1', 'ggggTTTT', 'TestTags', auto=False)
+        p._get_tag_parts('TestTags')
+        p._get_tag_wildcards()
+        assert p.regex.pattern == '^g?g?g?g?(TTTT)'
+        assert p.five_p_start.pattern == '^g*g*g*g+'
+
         #pdb.set_trace()
 
 '''

@@ -38,9 +38,9 @@ def test_tags():
     )
     p._get_combinations(combos)
     tags = (
-        ('p1', 'TTTT'),
-        ('n1', 'GGGG'),
-        ('n2', 'AAAA')
+        ('p1', 'TTTTtt'),
+        ('n1', 'GGGGgg'),
+        ('n2', 'AAAAaa')
     )
     p._get_sequences(tags)
     return p

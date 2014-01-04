@@ -292,13 +292,38 @@ class Tags:
 
 
 class TagMeta:
-    def __init__(self, name, string, section):
-        self._check_bases(string)
+    def __init__(self, name, string, section, auto=True):
+        self._check_bases(string, section)
         self.name = name
         self.string = string
-        self._get_tag_parts()
         self.string_len = len(self.string)
+        # extract the components of a given tag - preceding
+        # lowercase spacer middle uppercase tag or trailing
+        # lowercase space
+        if auto:
+            self._get_tag_parts(section)
+            self._get_tag_wildcards()
+            #pdb.set_trace()
+
+    def _check_bases(self, string, section):
+        nucleotides = set(list('ACGTacgt'))
+        for base in string:
+            try:
+                assert base in nucleotides
+            except:
+                raise ValueError("[{0}] Foward/Reverse bases must be in the "
+                                 "alphabet [ACGTacgt]".format(section))
+
+    def _get_tag_parts(self, section):
+        result = re.search('^([acgt]*)([ACGT]+)([acgt]*)$', self.string)
+        try:
+            self.five_p, self.tag, self.three_p = result.groups()
+        except:
+            raise ConfigurationError("[{}] The tags are not structured "
+                                     "correctly".format(section))
         self.tag_len = len(self.tag)
+
+    def _get_tag_wildcards(self):
         wild_five = ''.join(['{}?'.format(i) for i in self.five_p])
         wild_three = ''.join(['{}?'.format(i) for i in self.three_p])
         self.regex = re.compile(
@@ -310,24 +335,6 @@ class TagMeta:
             self.five_p_start = re.compile(temp_format, re.IGNORECASE)
         else:
             self.five_p_start = None
-        #pdb.set_trace()
-
-    def _check_bases(self, string):
-        nucleotides = set(list('ACGTacgt'))
-        for base in string:
-            try:
-                assert base in nucleotides
-            except:
-                raise ValueError("[{0}] Foward/Reverse bases must be in the "
-                                 "alphabet [ACGTacgt]".format(section))
-
-    def _get_tag_parts(self):
-        regex = re.compile('^([acgt]*)([ACGT]+)([acgt]*)$')
-        result = regex.search(self.string)
-        try:
-            self.five_p, self.tag, self.three_p = result.groups()
-        except:
-            pdb.set_trace()
 
 
 class ConfOverruns(dict):
