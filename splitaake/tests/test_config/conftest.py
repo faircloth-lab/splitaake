@@ -29,8 +29,13 @@ def tags(conffile):
 
 
 @pytest.fixture(scope="module")
+def sites(conffile):
+    return config.Sites(conffile)
+
+
+@pytest.fixture(scope="module")
 def test_tags():
-    p = config.Tags(False, 0, 'forward')
+    p = config.Tags(False, 0, 'forward', False)
     combos = (
         ("p1,n1", "combo1"),
         ("p1,n2", "combo2"),
@@ -44,3 +49,8 @@ def test_tags():
     )
     p._get_sequences(tags)
     return p
+
+
+@pytest.fixture(scope="module")
+def test_sites():
+    return config.Sites(False, 0, 'TGCA', 'TA', auto=True)
