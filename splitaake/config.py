@@ -11,15 +11,16 @@ Description:  config parameter and tag combination classes
 
 import os
 import re
-import sys
+import gzip
 import argparse
 import ConfigParser
 from collections import defaultdict
 from multiprocessing import cpu_count
+
 from seqtools.sequence.fasta import FastaSequence
 from seqtools.sequence.fastq import FastqWriter
-from seqtools.sequence.transform import DNA_reverse_complement, DNA_complement
-from seqtools.sequence.transform import reverse as DNA_reverse
+
+from splitaake.core import reverse_complement
 
 import pdb
 
@@ -201,7 +202,7 @@ class Quality:
 
 
 class Tags:
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
         self.type = None
         self.five_p_buffer = None
         self.three_p_buffer = None
@@ -217,6 +218,8 @@ class Tags:
         else:
             self.get_manual_tag_values(args)
             self.check_values()
+            if "auto" in kwargs and kwargs["auto"] is True:
+                self.build(args[3], args[4])
 
     def build(self, combos, tags):
         self._get_combinations(combos)
@@ -236,11 +239,16 @@ class Tags:
         self.three_p_orient = conf.get(
             'TagSetup',
             'ThreePrimeOrientation').lower()
+        self.trim_overruns = conf.getboolean(
+            'TagSetup',
+            'TrimOverruns'
+        )
 
     def get_manual_tag_values(self, args):
         self.fuzzy = args[0]
         self.errors = args[1]
         self.three_p_orient = args[2]
+        self.trim_overruns = args[3]
 
     def check_values(self):
         try:
@@ -337,37 +345,9 @@ class TagMeta:
             self.five_p_start = None
 
 
-class ConfOverruns(dict):
-    def __init__(self, conf, tags, site):
-        dict.__init__(self)
-        self.trim = conf.getboolean('TagSetup', 'TrimOverruns')
-        for combo in tags.name_d.keys():
-            r1name, r2name = combo.split(',')
-            r1t = tags.seq_d[r1name]
-            r2t = tags.seq_d[r2name]
-            both = {'r1':[OverrunsMeta(r2t, i.string) for i in site.r2], 'r2':[OverrunsMeta(r1t, i.string) for i in site.r1]}
-            dict.__setitem__(self, combo, both)
-        #pdb.set_trace()
-
-    def __getitem__(self, key):
-        val = dict.__getitem__(self, key)
-        return val
-
-
-class OverrunsMeta:
-    def __init__(self, tag, site):
-        #nucleotides = set(list('ACGTacgt'))
-        #for base in string:
-        #    assert base in nucleotides, ValueError("[{0}] Foward/Reverse bases must be in the alphabet [ACGTacgt]".format(section))
-        #self.name = name
-        self.string = DNA_reverse_complement("{0}{1}".format(tag, site)).upper()
-        self.string_len = len(self.string)
-        self.regex = re.compile("({0})".format(self.string), re.IGNORECASE)
-
-
-class ConfSite:
+class Sites:
     """get site parameters"""
-    def __init__(self, conf):
+    def __init__(self, *args, **kwargs):
         self.r1 = None
         self.r2 = None
         self.fuzzy = None
@@ -383,35 +363,62 @@ class ConfSite:
             'D': ('A', 'G', 'T'),
             'H': ('A', 'C', 'T'),
             'V': ('A', 'C', 'G'),
+            'N': ('A', 'C', 'G', 'T'),
         }
-        self._get_tag_values(conf)
-        self._get_sequences(conf)
-        self._get_forward(conf)
-        self._get_reverse(conf)
+        if isinstance(args[0], ConfigParser.ConfigParser):
+            self.get_tag_values(args[0])
+            self.check_values()
+            self.build()
+        else:
+            self.get_manual_tag_values(args)
+            self.check_values()
+            if "auto" in kwargs and kwargs["auto"] is True:
+                self.build()
 
-    def _get_tag_values(self, conf):
+    def get_tag_values(self, conf):
         self.fuzzy = conf.getboolean('SiteSetup', 'FuzzyMatching')
         if self.fuzzy:
             self.errors = conf.getint('SiteSetup', 'AllowedErrors')
         else:
             self.errors = 0
+        self.orig_forward_site = conf.get('SiteSetup', 'forward')
+        self.orig_reverse_site = conf.get('SiteSetup', 'reverse')
 
-    def _get_sequences(self, conf):
-        self.max_site_length = max([len(site) for site in [conf.get('SiteSetup', 'forward'), conf.get('SiteSetup', 'reverse')]])
+    def get_manual_tag_values(self, args):
+        self.fuzzy = args[0]
+        self.errors = args[1]
+        self.orig_forward_site = args[2]
+        self.orig_reverse_site = args[3]
 
-    def _get_forward(self, conf):
-        forward = conf.get('SiteSetup', 'forward')
-        forwards = self._convert_degenerate_primers(forward)
-        #pdb.set_trace()
+    def check_values(self):
+        try:
+            assert self.errors <= 5
+        except:
+            raise ConfigurationError("[Sites] You almost certainly want to "
+                                     "keep the number of allowable errors < 5")
+
+    def build(self):
+        self._get_sequences()
+        self._get_forward()
+        self._get_reverse()
+
+    def _get_sequences(self):
+        sites = [self.orig_forward_site, self.orig_reverse_site]
+        self.max_site_length = max([len(site) for site in sites])
+
+    def _get_forward(self):
+        forwards = self._convert_degenerate_primers(self.orig_forward_site)
         self.r1 = [TagMeta('r1site', s, 'SiteSetup') for s in forwards]
 
-    def _get_reverse(self, conf):
-        reverse = conf.get('SiteSetup', 'reverse')
-        reverses = self._convert_degenerate_primers(reverse)
+    def _get_reverse(self):
+        reverses = self._convert_degenerate_primers(self.orig_reverse_site)
         self.r2 = [TagMeta('r2site', s, 'SiteSetup') for s in reverses]
 
     def _convert_degenerate_primers(self, sites, lst=False):
-        """Convert a given degenerate primer sequence to standard IUPAC nuclteotides"""
+        """
+        Convert a given degenerate primer sequence to standard
+        IUPAC nuclteotides
+        """
         if not lst:
             sites = [sites]
         new_sites = []
@@ -421,19 +428,45 @@ class ConfSite:
                 if degen in site:
                     still_degen = True
                     for base in bases:
-                        new_sites.append(site.replace(degen, base))
+                        # replace only first degen base we find; let recursion
+                        # deal with those that follow
+                        new_sites.append(site.replace(degen, base, 1))
             if not still_degen:
                 new_sites.append(site)
-        #pdb.set_trace()
         if still_degen:
             new_sites = self._convert_degenerate_primers(new_sites, lst=True)
         new_sites = list(set(new_sites))
-        #pdb.set_trace()
         return new_sites
 
 
-class ConfStorage:
-    def __init__(self, conf, tags):
+class Overruns(dict):
+    def __init__(self, tags, sites):
+        dict.__init__(self)
+        self.trim = tags.trim_overruns
+        for combo in tags.name_d.keys():
+            r1name, r2name = combo.split(',')
+            r1t = tags.seq_d[r1name]
+            r2t = tags.seq_d[r2name]
+            both = {
+                'r1': [OverrunsMeta(r2t, i.string) for i in sites.r2],
+                'r2': [OverrunsMeta(r1t, i.string) for i in sites.r1]
+            }
+            dict.__setitem__(self, combo, both)
+
+    def __getitem__(self, key):
+        val = dict.__getitem__(self, key)
+        return val
+
+
+class OverrunsMeta:
+    def __init__(self, tag, site):
+        self.string = reverse_complement("{0}{1}".format(tag, site)).upper()
+        self.string_len = len(self.string)
+        self.regex = re.compile("({0})".format(self.string), re.IGNORECASE)
+
+
+class Storage:
+    def __init__(self, tags):
         self.output = defaultdict(lambda: defaultdict(str))
         tld = 'splitaake-output'
         os.mkdir(tld)
@@ -441,9 +474,13 @@ class ConfStorage:
             fpath = os.path.join(tld, indiv)
             os.mkdir(fpath)
             for read in ['R1', 'R2']:
-                name = "{0}-{1}.fastq".format(indiv, read)
-                fname = os.path.join(fpath, name)
-                self.output[indiv][read] = FastqWriter(fname)
+                name = "{0}-{1}.fastq.gz".format(indiv, read)
+                self.output[indiv][read] = self._open_zip_file(
+                    os.path.join(fpath, name)
+                )
+
+    def _open_zip_file(self, pth):
+        return gzip.open(pth, 'wb')
 
     def close(self):
         for name, files in self.output.iteritems():
@@ -452,306 +489,13 @@ class ConfStorage:
 
 
 class Parameters:
-    '''linkers.py run parameters'''
+    """All run parameters"""
     def __init__(self, conf):
-        self.db = ConfDb(conf)
-        self.parallelism = ConfParallelism(conf)
-        self.reads = ConfReads(conf)
-        self.quality = ConfQuality(conf)
-        self.tags = ConfTag(conf)
-        self.site = ConfSite(conf)
-        self.overruns = ConfOverruns(conf, self.tags, self.site)
-        self.storage = ConfStorage(conf, self.tags)
-
-
-class SequenceTags:
-    """ """
-    def __init__(self, all_outers, all_inners, search, group, outer_gap, inner_gap,
-            concat, o_type, o_orientation, i_type, i_orientation):
-        self.outers = None
-        self.inners = None
-        self.cluster_map = None
-        self.all_tags = None
-        self.outer_gap = outer_gap
-        self.inner_gap = inner_gap
-        if all_outers:
-            # map mid sequences to names
-            self.reverse_outer_lookup = self._reverse_dict(all_outers)
-            self.outer_len = self._get_length(all_outers)
-        if all_inners:
-            # map linker sequences to names
-            self.reverse_inner_lookup = self._reverse_dict(all_inners)
-            self.inner_len = self._get_length(all_inners)
-        # pare down the list of linkers and MIDS to those we've used
-        self._generate_clusters_and_get_cluster_tags(all_outers, all_inners, search,
-                group, o_type, o_orientation, i_type, i_orientation)
-        # do we check for concatemers?
-        if concat:
-            self._all_possible_tags(search)
-
-    def __str__(self):
-        return "{0}({1})".format(self.__class__, self.__dict__)
-
-    def __repr__(self):
-        return "<{0} instance at {1}>".format(self.__class__, hex(id(self)))
-
-    def _get_length(self, tags):
-        #linkers         = dict(self.conf.items('Linker'))
-        lset = set([len(l) for l in tags.values()])
-        assert len(lset) == 1, "Your {} sequences are difference lengths".format(name)
-        return lset.pop()
-
-    def _build_regex(self, tags, gap, rev=False):
-        if not rev:
-            return [re.compile('^[acgtnACGTN]{{0,{}}}{}'.format(gap, seq)) for seq in
-                    tags]
-        else:
-            return [re.compile('{}[acgtnACGTN]{{0,{}}}$'.format(seq, gap))
-                    for seq in tags]
-
-    def _reverse_dict(self, d):
-        return {v:k for k, v in d.iteritems()}
-
-    def _parse_group(self, row, length=False):
-        if length == 'short':
-            m = row[0].replace(' ', '')
-            return m, row[1]
-        elif length == 'long':
-            o1, i1, i2, o2 = row[0].replace(' ', '').split(',')
-            return o1, i1, i2, o2, row[1]
-        else:
-            m, l = row[0].replace(' ', '').split(',')
-            return m, l, row[1]
-
-    def _generate_outer_regex(self, outer_type):
-        # compile regular expressions:
-        self.outers['forward_regex'] = \
-                self._build_regex(self.outers['forward_string'],
-                self.outer_gap)
-        if outer_type.lower() == 'both':
-            self.outers['reverse_regex'] = \
-                    self._build_regex(self.outers['reverse_string'],
-                    self.outer_gap, rev=True)
-
-    def _generate_inner_regex(self, inner_type):
-        for m in self.inners:
-            self.inners[m]['forward_regex'] = \
-                self._build_regex(self.inners[m]['forward_string'],
-                self.inner_gap)
-            if inner_type.lower() == 'both':
-                self.inners[m]['reverse_regex'] = \
-                    self._build_regex(self.inners[m]['reverse_string'],
-                    self.inner_gap, rev=True)
-
-    def _generate_inner_combi_regex(self, inner_type):
-        for m in self.inners:
-            self.inners[m]['forward_regex'] = \
-                self._build_regex(self.inners[m]['forward_string'],
-                self.inner_gap)
-            if inner_type.lower() == 'both':
-                self.inners[m]['reverse_regex'] = \
-                self._build_regex(self.inners[m]['reverse_string'],
-                self.inner_gap)
-
-    def _generate_outer_reverse_strings(self, m, outer_type, outer_orientation):
-        if outer_type.lower() == 'both':
-            if outer_orientation.lower() == 'reverse':
-                self.outers['reverse_string'].add(DNA_reverse_complement(m))
-            else:
-                self.outers['reverse_string'].add(m)
-
-    def _generate_inner_reverse_strings(self, m, l, inner_type,
-            inner_orientation):
-        #if inner_type == 'single':
-        #    pdb.set_trace()
-        if inner_type.lower() == 'both':
-            if inner_orientation.lower() == 'reverse':
-                self.inners[str(m)]['reverse_string'].add(DNA_reverse_complement(l))
-            else:
-                # reverse orientation really == forward orientation
-                self.inners[str(m)]['reverse_string'].add(l)
-
-    def _generate_outer_inner_groups(self, all_outers, all_inners, group,
-            o_type, o_orientation, i_type, i_orientation):
-        self.outers = defaultdict(set)
-        self.inners = defaultdict(lambda: defaultdict(set))
-        for row in group:
-            m, l, org = self._parse_group(row)
-            self.outers['forward_string'].add(all_outers[m])
-            self._generate_outer_reverse_strings(all_outers[m],
-                    o_type, o_orientation)
-            self.inners[all_outers[m]]['forward_string'].add(all_inners[l])
-            self._generate_inner_reverse_strings(all_outers[m],
-                    all_inners[l], i_type, i_orientation)
-            self.cluster_map[all_outers[m]][all_inners[l]] = org
-        # compile regular expressions for outers and inners
-        self._generate_outer_regex(o_type)
-        self._generate_inner_regex(i_type)
-
-    def _generate_outer_groups(self, all_outers, group, o_type, o_orientation):
-        self.outers = defaultdict(set)
-        for row in group:
-            m, org = self._parse_group(row, length='short')
-            self.outers['forward_string'].add(all_outers[m])
-            self._generate_outer_reverse_strings(all_outers[m], o_type,
-                    o_orientation)
-            self.cluster_map[all_outers[m]]['None'] = org
-        # compile regular expressions for outers
-        self._generate_outer_regex(o_type)
-
-    def _generate_inner_groups(self, all_inners, group, i_type, i_orientation):
-        self.inners = defaultdict(lambda: defaultdict(set))
-        for row in group:
-            l, org = self._parse_group(row, length='short')
-            self.inners['None']['forward_string'].add(all_inners[l])
-            self._generate_inner_reverse_strings(None, all_inners[l],
-                    i_type, i_orientation)
-            self.cluster_map['None'][all_inners[l]] = org
-        # compile regular expressions for inners
-        self._generate_inner_regex(i_type)
-
-    def _make_combinatorial_cluster_map(self, ll, rl):
-        return "{},{}".format(ll, rl)
-
-    def _generate_inner_combinatorial_groups(self, all_inners, group,
-            i_type, i_orientation):
-        self.inners = defaultdict(lambda: defaultdict(set))
-        for row in group:
-            m, l, org = self._parse_group(row)
-            self.inners['None']['forward_string'].add(all_inners[m])
-            #self._generate_inner_reverse_strings(None, all_inners[l],
-            #        i_type, i_orientation)
-            self.inners['None']['reverse_string'].add(all_inners[l])
-            name = self._make_combinatorial_cluster_map(all_inners[m], all_inners[l])
-            self.cluster_map['None'][name] = org
-        # compile regular expressions for combinatorial inners
-        #self._generate_inner_regex(i_type)
-        self._generate_inner_combi_regex(i_type)
-
-    def _generate_outer_combinatorial_groups(self, all_outers, group, o_type,
-            o_orientation):
-        self.outers = defaultdict(set)
-        for row in group:
-            m, l, org = self._parse_group(row)
-            #pdb.set_trace()
-            self.outers['forward_string'].add(all_outers[m])
-            self._generate_outer_reverse_strings(all_outers[l], o_type,
-                    o_orientation)
-            name = self._make_combinatorial_cluster_map(all_outers[m], all_outers[l])
-            self.cluster_map['None'][name] = org
-        # compile regular expressions for combinatorial outers
-        self._generate_outer_regex(o_type)
-
-    def _generate_hierarchical_combinatorial_groups(self, all_outers, all_inners,
-            group, o_type, o_orientation, i_type, i_orientation):
-        self.outers = defaultdict(set)
-        self.inners = defaultdict(lambda: defaultdict(set))
-        for row in group:
-            m, ll, rl, n, org = self._parse_group(row, length='long')
-            #pdb.set_trace()
-            assert m == n, "Outer tags in hierarchical combo must agree"
-            self.outers['forward_string'].add(all_outers[m])
-            self._generate_outer_reverse_strings(all_outers[m], o_type,
-                    o_orientation)
-            self.inners[all_outers[m]]['forward_string'].add(all_inners[ll])
-            self._generate_inner_reverse_strings(all_outers[m], all_inners[rl],
-                    i_type, i_orientation)
-            name = self._make_combinatorial_cluster_map(all_inners[ll],
-                    all_inners[rl])
-            self.cluster_map[all_outers[m]][name] = org
-        # compile regular expressions for outers and inners
-        self._generate_outer_regex(o_type)
-        self._generate_inner_regex(i_type)
-
-    def _generate_clusters_and_get_cluster_tags(self, all_outers, all_inners, search,
-            group, o_type, o_orientation, i_type, i_orientation):
-
-        self.cluster_map = defaultdict(lambda: defaultdict(str))
-
-        if search == 'OuterGroups':
-            self._generate_outer_groups(all_outers, group, o_type,
-                    o_orientation)
-
-        elif search == 'InnerGroups':
-            self._generate_inner_groups(all_inners, group, i_type,
-                    i_orientation)
-
-        elif search == 'OuterInnerGroups':
-            self._generate_outer_inner_groups(all_outers, all_inners, group,
-                    o_type, o_orientation, i_type, i_orientation)
-
-        elif search == 'InnerCombinatorial':
-            self._generate_inner_combinatorial_groups(all_inners, group,
-                    i_type, i_orientation)
-
-        elif search == 'OuterCombinatorial':
-            self._generate_outer_combinatorial_groups(all_outers, group,
-                    o_type, o_orientation)
-
-        elif search == 'HierarchicalCombinatorial':
-            self._generate_hierarchical_combinatorial_groups(all_outers,
-                     all_inners, group, o_type, o_orientation, i_type,
-                     i_orientation)
-
-    def _all_possible_tags(self, search):
-        '''Create regular expressions for the forward and reverse complements
-        of all of the tags sequences used in a run'''
-        # at = all tags; rat = reverse complement all tags
-        self.all_tags = defaultdict(lambda: defaultdict(set))
-        if self.inners:
-            for m in self.inners:
-                m = str(m)
-                if 'reverse_string' in self.inners[m].keys():
-                    self.all_tags[m]['string'] = \
-                            self.inners[m]['forward_string'].union(self.inners[m]['reverse_string'])
-                else:
-                    self.all_tags[m]['string'] = \
-                             self.all_tags[m]['string'].union(self.inners[m]['forward_string'])
-        else:
-            m = 'None'
-            if 'reverse_string' in self.outers.keys():
-                self.all_tags[m]['string'] = \
-                        self.outers['forward_string'].union(self.outers['reverse_string'])
-            else:
-                self.all_tags[m]['string'] = \
-                             self.all_tags[m]['string'].union(self.outers['forward_string'])
-        # compile
-        self.all_tags[m]['regex'] = [re.compile(t) for t in
-                self.all_tags[m]['string']]
-
-
-class Tagged:
-    '''Trimming, tag, and sequence data for individual reads'''
-    def __init__(self, sequence):
-        # super(Params, self).__init__()
-        #assert isinstance(sequence, FastaSequence), \
-        #    'The Record class must be instantiated with a FastaSequence object'
-        # a biopython sequence object
-        self.read = sequence
-        self.outer = None
-        self.outer_name = None
-        self.outer_seq = None
-        self.outer_match = None
-        self.outer_type = None
-        self.inner_name = None
-        self.inner_seq = None
-        self.inner_match = None
-        self.inner_type = None
-        self.cluster = None
-        self.concat_seq = None
-        self.concat_type = None
-        self.concat_match = None
-
-    #def __repr__(self):
-    #    return '''<linkers.record for %s>''' % self.identifier
-
-
-def reverse(items, null=False):
-    '''build a reverse dictionary from a list of tuples'''
-    l = []
-    if null:
-        items += ((None, None),)
-    for i in items:
-        t = (i[1], i[0])
-        l.append(t)
-    return dict(l)
+        self.db = Db(conf)
+        self.parallelism = Parallelism(conf)
+        self.reads = Reads(conf)
+        self.quality = Quality(conf)
+        self.tags = Tags(conf)
+        self.sites = Sites(conf)
+        self.overruns = Overruns(self.tags, self.sites)
+        self.storage = Storage(self.tags)
