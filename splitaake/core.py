@@ -17,6 +17,7 @@ import sys
 import gzip
 import numpy
 import errno
+import string
 import itertools
 
 from jellyfish import levenshtein_distance as levenshtein
@@ -142,6 +143,18 @@ def mkdir_p(path):
             pass
         else:
             raise
+
+
+def complement(s):
+    complement = string.maketrans(
+        'acgtrymkbdhvACGTRYMKBDHV',
+        'tgcayrkmvhdbTGCAYRKMVHDB'
+    )
+    return s.translate(complement)
+
+
+def reverse_complement(s):
+    return complement(s)[::-1]
 
 
 def merge_fastq(a, b):
