@@ -140,6 +140,12 @@ class TestTags:
     def test_max_tag_length_1(self, tags):
         assert tags.max_tag_length == 8
 
+    def test_check_values(self):
+        with pytest.raises(config.ConfigurationError) as excinfo:
+            config.Tags(False, 0, 'dog', False)
+            assert excinfo.values == ("[TagSetup] ThreePrimeOrientation must "
+                                      "be 'Forward' or 'Reverse'")
+
     def test_get_sequences(self, test_tags):
         assert test_tags.seq_d == {
             'p1': 'TTTTtt',
@@ -217,7 +223,7 @@ class TestTags:
 
 
 class TestTagMeta:
-    def test_normal_tag_meta_1(self):
+    def test_tag_meta(self):
         p = config.TagMeta('n4', 'ACTGtagc', 'TagSequences')
         assert p.name == 'n4'
         assert p.string == 'ACTGtagc'
@@ -282,15 +288,107 @@ class TestTagMeta:
         assert p.regex.pattern == '^g?g?g?g?(TTTT)'
         assert p.five_p_start.pattern == '^g*g*g*g+'
 
-        #pdb.set_trace()
 
-'''
-@pytest.fixture(scope="module")
-def p(conf_file):
-    return config.Parameters(conf_file)
+class TestSites:
+    def test_site_params(self, sites):
+        assert sites.fuzzy is False
+        assert sites.errors == 0
+        assert sites.iupac == {
+            'R': ('A', 'G'),
+            'Y': ('C', 'T'),
+            'S': ('G', 'C'),
+            'W': ('A', 'T'),
+            'K': ('G', 'T'),
+            'M': ('A', 'C'),
+            'B': ('C', 'G', 'T'),
+            'D': ('A', 'G', 'T'),
+            'H': ('A', 'C', 'T'),
+            'V': ('A', 'C', 'G'),
+            'N': ('A', 'C', 'G', 'T'),
+        }
+        assert sites.orig_forward_site == 'TGCA'
+        assert sites.orig_reverse_site == 'TA'
+        assert sites.max_site_length == 4
+        assert len(sites.r1) == 1
+        assert sites.r1[0].five_p == ''
+        assert sites.r1[0].five_p_start is None
+        assert sites.r1[0].name == 'r1site'
+        assert sites.r1[0].regex.pattern == '^(TGCA)'
+        assert sites.r1[0].string == 'TGCA'
+        assert sites.r1[0].string_len == 4
+        assert sites.r1[0].tag == 'TGCA'
+        assert sites.r1[0].tag_len == 4
+        assert sites.r1[0].three_p == ''
 
-class TestParametersMethods:
-    def test_first(self, p):
-        if p:
-            return
-'''
+    def test_degenerate_primer_conversion_1(self):
+        p = config.Sites(False, 0, "TTTTTTRTTTTTTTTTT", "CCCCCCCCCCCCCCCCC")
+        primers = p._convert_degenerate_primers(p.orig_forward_site)
+        assert primers == ['TTTTTTATTTTTTTTTT', 'TTTTTTGTTTTTTTTTT']
+
+    def test_degenerate_primer_conversion_2(self):
+        p = config.Sites(False, 0, "TTTTTTRTTTTTTTTTR", "CCCCCCCCCCCCCCCCC")
+        primers = p._convert_degenerate_primers(p.orig_forward_site)
+        assert primers == [
+            'TTTTTTATTTTTTTTTG',
+            'TTTTTTATTTTTTTTTA',
+            'TTTTTTGTTTTTTTTTA',
+            'TTTTTTGTTTTTTTTTG'
+        ]
+
+    def test_degenerate_primer_conversion_3(self):
+        p = config.Sites(False, 0, "RTTTTTRTTTTTTTTTR", "CCCCCCCCCCCCCCCCC")
+        primers = p._convert_degenerate_primers(p.orig_forward_site)
+        assert primers == [
+            'ATTTTTGTTTTTTTTTG',
+            'GTTTTTATTTTTTTTTG',
+            'ATTTTTGTTTTTTTTTA',
+            'GTTTTTATTTTTTTTTA',
+            'ATTTTTATTTTTTTTTA',
+            'ATTTTTATTTTTTTTTG',
+            'GTTTTTGTTTTTTTTTA',
+            'GTTTTTGTTTTTTTTTG'
+        ]
+
+    def test_degenerate_primer_conversion_4(self):
+        p = config.Sites(False, 0, "TTTTTTTTTTTTTTTTT", "BCCCCCCCCCCCCCCCC")
+        primers = p._convert_degenerate_primers(p.orig_reverse_site)
+        assert primers == [
+            'CCCCCCCCCCCCCCCCC',
+            'TCCCCCCCCCCCCCCCC',
+            'GCCCCCCCCCCCCCCCC'
+        ]
+
+    def test_degenerate_primer_conversion_5(self):
+        p = config.Sites(False, 0, "TTTTTTTTTTTTTTTTT", "RCCCCCCCCCCCCCCCN")
+        primers = p._convert_degenerate_primers(p.orig_reverse_site)
+        assert primers == [
+            'ACCCCCCCCCCCCCCCC',
+            'ACCCCCCCCCCCCCCCA',
+            'ACCCCCCCCCCCCCCCG',
+            'GCCCCCCCCCCCCCCCC',
+            'GCCCCCCCCCCCCCCCG',
+            'GCCCCCCCCCCCCCCCT',
+            'ACCCCCCCCCCCCCCCT',
+            'GCCCCCCCCCCCCCCCA'
+        ]
+
+
+class TestTrimOverruns:
+    def test_trim_overruns_r1(self, test_tags, test_sites):
+        p = config.Overruns(test_tags, test_sites)
+        # this structure is reverse_complement((TAG + SITE))
+        assert p['n1,p1']['r1'][0].regex.pattern == '(TAAAAAAA)'
+        assert p['n1,p1']['r1'][0].string == 'TAAAAAAA'
+        assert p['n1,p1']['r1'][0].string_len == 8
+
+    def test_trim_overruns_r2(self, test_tags, test_sites):
+        p = config.Overruns(test_tags, test_sites)
+        # this structure is reverse_complement((TAG + SITE))
+        assert p['n1,p1']['r2'][0].regex.pattern == '(TGCACCCCCC)'
+        assert p['n1,p1']['r2'][0].string == 'TGCACCCCCC'
+        assert p['n1,p1']['r2'][0].string_len == 10
+
+
+class TestStorage:
+    def test_storage(self, test_tags, test_sites):
+        pass
