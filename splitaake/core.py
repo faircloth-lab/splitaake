@@ -47,7 +47,7 @@ class AlignScore:
         self.matches = match
         self.errors = errors
         self.offset = offset
-        
+
 class Demux:
     '''Trimming, tag, and sequence data for individual reads'''
     def __init__(self, identifier):
@@ -348,10 +348,10 @@ def find_tag(seq, tags, read, match_type, result):
 
 def find_which_reads_have_sites(params, dmux):
     find_site(dmux.r1.sequence, params.site, 'r1', dmux.r1site)
-    if dmux.r1site.match:
+    if dmux.r1site.match and params.site.trim:
         trim_tags_from_reads(dmux.r1, dmux.r1site.start, dmux.r1site.end)
     find_site(dmux.r2.sequence, params.site, 'r2', dmux.r2site)
-    if dmux.r2site.match:
+    if dmux.r2site.match and params.site.trim:
         trim_tags_from_reads(dmux.r2, dmux.r2site.start, dmux.r2site.end)
     return dmux
 

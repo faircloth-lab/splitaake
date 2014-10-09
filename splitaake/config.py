@@ -126,10 +126,14 @@ class ConfTag:
         self.three_p_orient = None
         self.fuzzy = None
         self.errors = None
+        # Always trim tags by default
+        # self.trim = True
 
         self._get_tag_values(conf)
         self._get_combinations(conf)
         self._get_sequences(conf)
+        # Always trim tags by default
+        #self._get_trim_status(conf)
         self._get_reverse_sequences()
         self._get_r1_tags()
         self._get_r2_tags()
@@ -154,6 +158,10 @@ class ConfTag:
     def _get_sequences(self, conf):
         self.seq_d = dict(conf.items('TagSequences'))
         self.max_tag_length = max([len(v) for k, v in self.seq_d.iteritems()])
+
+    # Always trim tags by default
+    #def _get_trim_status(self, conf):
+    #    self.trim = conf.getboolean('TagSetup', 'Trim')
 
     def _get_reverse_sequences(self):
         self.rev_seq_d = {v: k for k, v in self.seq_d.iteritems()}
@@ -252,10 +260,12 @@ class ConfSite:
             'H': ('A', 'C', 'T'),
             'V': ('A', 'C', 'G'),
         }
+        self.trim = True
         self._get_tag_values(conf)
         self._get_sequences(conf)
         self._get_forward(conf)
         self._get_reverse(conf)
+        self._get_trim_status(conf)
 
     def _get_tag_values(self, conf):
         self.fuzzy = conf.getboolean('SiteSetup', 'FuzzyMatching')
@@ -298,6 +308,9 @@ class ConfSite:
         new_sites = list(set(new_sites))
         #pdb.set_trace()
         return new_sites
+
+    def _get_trim_status(self, conf):
+        self.trim = conf.getboolean('SiteSetup', 'Trim')
 
 
 class ConfStorage:
