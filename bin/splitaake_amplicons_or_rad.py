@@ -78,6 +78,7 @@ def multiproc(jobs, results, params):
         if job is None:
             break
         singleproc(job, results, params)
+	del job
 
 
 def get_work(params, job_size=10000):
@@ -156,6 +157,8 @@ def main():
             write_results_out(cur, rowid, params, dmux)
             results.task_done()
             progress(rowid, 10000, 100000)
+            # delete obj
+            del dmux
             count += 1
         # make sure we put None at end of Queue
         # in an amount equiv. to num_procs
