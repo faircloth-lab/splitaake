@@ -137,13 +137,11 @@ def merge_fastq(a, b):
         yield i, j
 
 
-def split_and_check_reads(pair):
-    assert len(pair) == 2
-    r1, r2 = pair
+def split_and_check_reads(r1, r2):
     identifiers = [i.identifier.split(' ')[0] for i in [r1, r2]]
     # make sure fastq headers are the same
     assert identifiers[0] == identifiers[1]
-    return r1, r2, identifiers[0]
+    return identifiers[0]
 
 
 def split_every(n, iterable):

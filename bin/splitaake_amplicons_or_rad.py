@@ -46,13 +46,9 @@ def get_args():
 
 
 def singleproc(sequences, results, params, interval=1000, big_interval=10000):
-    print sequences
-    for pair in sequences:
-        r1f = FastqReader(pair[0])
-        r2f = FastqReader(pair[1])
-        for i, j in itertools.izip(r1f, r2f):
-            pair = (i,j)
-            r1, r2, header = split_and_check_reads(pair)
+    for reads in sequences:
+        for r1, r2 in itertools.izip(FastqReader(reads[0]), FastqReader(reads[1])):
+            header = split_and_check_reads(r1,r2)
             # create a Demux metadata object to hold ID information
             dmux = Demux(header)
             # quality trim the ends of reads before proceeding
@@ -87,21 +83,6 @@ def multiproc(jobs, results, params):
             break
         singleproc([job], results, params)
 
-'''
-def get_work(params, job_size=10000):
-    try:
-        num_reads = get_sequence_count(params.reads.r1, 'fastq')
-        reads1 = FastqReader(params.reads.r1)
-        reads2 = FastqReader(params.reads.r2)
-        if params.parallelism.cores > 1:
-            merged = merge_fastq(reads1, reads2)
-            work = split_every(job_size, merged)
-        else:
-            work = merge_fastq(reads1, reads2)
-    except:
-        raise IOError("Cannot find r1 and r2 parameters in configuration file")
-    return num_reads, work
-'''
 
 def is_gzip(filename):
     magic_bytes = "\x1f\x8b\x08"
@@ -136,14 +117,12 @@ def write(reads, name, is_gzip=True):
     tempfiles = []
     for cnt, batch in enumerate(batches(reads)):
         if is_gzip:
-            outfile = tempfile.NamedTemporaryFile(mode="w+b", delete=False, prefix=name, dir="splitaake-temp/splitaake-input-temp", suffix=".fastq.gz")
-            gz = gzip.GzipFile(mode="wb", fileobj=outfile)
-            [gz.write("{}{}{}{}".format(*seq)) for seq in batch]
-            gz.close()
-            outfile.close()
+            outfile = tempfile.NamedTemporaryFile(mode="w+b", delete=False, prefix=name, dir="splitaake-temp", suffix=".fastq.gz")
+            with gzip.GzipFile(mode="wb", fileobj=outfile) as gz:
+                [gz.write("{}{}{}{}".format(*seq)) for seq in batch]
             tempfiles.append(outfile.name)
         else:
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, prefix=name, dir="splitaake-temp/splitaake-input-temp", suffix=".fastq") as outfile:
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, prefix=name, dir="splitaake-temp", suffix=".fastq") as outfile:
                 [outfile.write("{}{}{}{}".format(*seq)) for seq in batch]
                 tempfiles.append(outfile.name)
     return tempfiles
@@ -175,27 +154,19 @@ def main():
     print "[WARN] Dropping all demultiplexed reads ≤ {0} bp long".format(params.quality.drop_len)
     # counting reads
     num_reads = get_sequence_count(params.reads.r1, 'fastq')
-    print "There are {:,d} reads".format(num_reads)
+    print "[INFO] There are {:,d} reads".format(num_reads)
     # make a temporary directory for all files
     os.makedirs("splitaake-temp")
-    os.makedirs("splitaake-temp/splitaake-input-temp")
-    os.makedirs("splitaake-temp/splitaake-output-temp")
-    os.makedirs("splitaake-temp/splitaake-output")
     # get num reads and split up work
     print "Splitting reads into work units..."
     if params.parallelism.cores > 1:
+        # use static two processors to run
         p = Pool(2)
         tempfiles = p.map(split, [params.reads.r1, params.reads.r2])
     else:
         tempfiles = map(split, [params.reads.r1, params.reads.r2])
     # re-pair split R1 with R2 mates
     work = zip(tempfiles[0], tempfiles[1])
-    print "There are {} batches of reads".format(len(work))
-    #num_reads, work = get_work(params, args.job_size)
-    # give some indication of progress for longer runs
-    #if num_reads > 999:
-    #    sys.stdout.write('Running...\n')
-    #pdb.set_trace()
     # MULTICORE
     if params.parallelism.cores > 1:
         jobs = Queue()
@@ -203,7 +174,7 @@ def main():
         # We're stacking groups of jobs on the work
         # Queue, conceivably to save the overhead of
         # placing them on there one-by-one.
-        print "Adding jobs to work queue..."
+        print "[Info] Adding {} jobs to work queue...".format(len(work))
         for unit in work:
             jobs.put(unit)
 
@@ -220,16 +191,12 @@ def main():
             rowid = db.insert_record_to_db(cur, dmux)
             write_results_out(cur, rowid, params, dmux)
             results.task_done()
-            #progress(rowid, 10000, 100000)
-            # delete obj
-            #del dmux
+            progress(rowid, 10000, 100000)
             count += 1
-        print "joining results"
         for unit in xrange(params.parallelism.cores):
             jobs.put(None)
         # join the results, so that they can finish
         results.join()
-        print "closing queues"
         # close up our queues
         jobs.close()
         results.close()
@@ -245,8 +212,6 @@ def main():
             rowid = db.insert_record_to_db(cur, dmux)
             write_results_out(cur, rowid, params, dmux)
             progress(rowid, 10000, 100000)
-            # delete obj
-            del dmux
             count += 1
     params.storage.close()
     conn.commit()
