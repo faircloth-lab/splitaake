@@ -109,7 +109,7 @@ def split(filename):
 
 def batches(reads):
     while True:
-        batchiter = itertools.islice(reads, 100000)
+        batchiter = itertools.islice(reads, 1000000)
         yield itertools.chain([batchiter.next()], batchiter)
 
 
