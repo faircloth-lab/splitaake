@@ -28,6 +28,8 @@ from seqtools.sequence.transform import DNA_reverse_complement
 from splitaake.core import *
 from splitaake import db
 
+import gc
+
 
 def get_args():
     """get arguments (config file location)"""
@@ -72,6 +74,8 @@ def singleproc(sequences, results, params, interval=1000, big_interval=10000):
                         if params.overruns.trim == True:
                             dmux = find_which_reads_have_overruns(params, dmux)
             results.put(dmux)
+            del r1
+            del r2
     return results
 
 
@@ -193,6 +197,9 @@ def main():
             results.task_done()
             progress(rowid, 10000, 100000)
             count += 1
+            # explicitly delete to hopefully free the RAM
+            del dmux
+            #
         for unit in xrange(params.parallelism.cores):
             jobs.put(None)
         # join the results, so that they can finish
@@ -213,6 +220,9 @@ def main():
             write_results_out(cur, rowid, params, dmux)
             progress(rowid, 10000, 100000)
             count += 1
+            # explicitly delete to hopefully free the RAM
+            del dmux
+            #
     params.storage.close()
     conn.commit()
     cur.close()
