@@ -7,7 +7,7 @@ Author: Brant Faircloth
 Created by Brant Faircloth on 16 June 2012 15:06 PDT (-0700)
 Copyright (c) 2012 Brant C. Faircloth. All rights reserved.
 
-Description: 
+Description:
 
 """
 
@@ -17,7 +17,11 @@ import re
 import sys
 import time
 import ConfigParser
-from multiprocessing import Process, Queue, JoinableQueue, cpu_count
+import os
+import gzip
+import itertools
+import tempfile
+from multiprocessing import Pool, Process, Queue, JoinableQueue, cpu_count
 from seqtools.sequence.fastq import FastqReader
 from seqtools.sequence.fasta import FastaQualityReader
 from seqtools.sequence.transform import DNA_reverse_complement
@@ -29,7 +33,7 @@ def get_args():
     """get arguments (config file location)"""
     parser = argparse.ArgumentParser(description = "splitaake.py:  sequence " + \
         "demultiplexing for hierarchically-tagged samples")
-    parser.add_argument('config', 
+    parser.add_argument('config',
             help="The input configuration file",
             action=FullPaths
         )
@@ -43,31 +47,32 @@ def get_args():
 
 def singleproc(sequences, results, params, interval=1000, big_interval=10000):
     for pair in sequences:
-        r1, r2, header = split_and_check_reads(pair)
-        # create a Demux metadata object to hold ID information
-        dmux = Demux(header)
-        # quality trim the ends of reads before proceeding
-        if params.quality.trim:
-            r1.read, r2.read = [r.trim(params.quality.min, False) for r in [r1, r2]]
-        # drop anything with an N in either read after quality trimming
-        if params.quality.drop_n:
-            if 'N' in r1.sequence or 'N' in r2.sequence:
-                dmux.drop = True
-        # keep all reads when params.quality.drop_n == FALSE
-        if not dmux.drop:
-            #pdb.set_trace()
-            dmux = find_which_reads_have_tags(params, r1, r2, dmux)
-            # if we've assigned reads (which means we've assigned tags)
-            if dmux.r1tag.match and dmux.r2tag.match:
-                try:
-                    dmux.individual = params.tags.combo_lookup(dmux.r1tag.name, dmux.r2tag.name)
-                except KeyError:
-                    dmux.individual = None
-                if dmux.individual is not None:
-                    dmux = find_which_reads_have_sites(params, dmux)
-                    if params.overruns.trim == True:
-                        dmux = find_which_reads_have_overruns(params, dmux)
-        results.put(dmux)
+        for i, j in itertools.izip(FastqReader(pair[0]), FastqReader(pair[1])):
+            pair = (i,j)
+            r1, r2, header = split_and_check_reads(pair)
+            # create a Demux metadata object to hold ID information
+            dmux = Demux(header)
+            # quality trim the ends of reads before proceeding
+            if params.quality.trim:
+                r1.read, r2.read = [r.trim(params.quality.min, False) for r in [r1, r2]]
+            # drop anything with an N in either read after quality trimming
+            if params.quality.drop_n:
+                if 'N' in r1.sequence or 'N' in r2.sequence:
+                    dmux.drop = True
+            # keep all reads when params.quality.drop_n == FALSE
+            if not dmux.drop:
+                dmux = find_which_reads_have_tags(params, r1, r2, dmux)
+                # if we've assigned reads (which means we've assigned tags)
+                if dmux.r1tag.match and dmux.r2tag.match:
+                    try:
+                        dmux.individual = params.tags.combo_lookup(dmux.r1tag.name, dmux.r2tag.name)
+                    except KeyError:
+                        dmux.individual = None
+                    if dmux.individual is not None:
+                        dmux = find_which_reads_have_sites(params, dmux)
+                        if params.overruns.trim == True:
+                            dmux = find_which_reads_have_overruns(params, dmux)
+            results.put(dmux)
     return results
 
 
@@ -76,11 +81,11 @@ def multiproc(jobs, results, params):
     while True:
         job = jobs.get()
         if job is None:
+            jobs.task_done()
             break
         singleproc(job, results, params)
-	del job
 
-
+'''
 def get_work(params, job_size=10000):
     try:
         num_reads = get_sequence_count(params.reads.r1, 'fastq')
@@ -94,6 +99,50 @@ def get_work(params, job_size=10000):
     except:
         raise IOError("Cannot find r1 and r2 parameters in configuration file")
     return num_reads, work
+'''
+
+def is_gzip(filename):
+    magic_bytes = "\x1f\x8b\x08"
+    with open(filename) as infile:
+        file_start = infile.read(len(magic_bytes))
+    if file_start.startswith(magic_bytes):
+        return True
+    return False
+
+
+def split(filename):
+    # write files to dir
+    name = os.path.splitext(os.path.basename(filename))[0] + "-"
+    if is_gzip(filename):
+        with gzip.open(filename, 'rb') as infile:
+            reads = itertools.izip_longest(*[infile]*4)
+            tempfiles = write(reads, name, is_gzip=True)
+    else:
+        with open(filename, 'rU') as infile:
+            reads = itertools.izip_longest(*[infile]*4)
+            tempfiles = write(reads, name, is_gzip=False)
+    return tempfiles
+
+
+def batches(reads):
+    while True:
+        batchiter = itertools.islice(reads, 10000)
+        yield itertools.chain([batchiter.next()], batchiter)
+
+
+def write(reads, name, is_gzip=True):
+    tempfiles = []
+    for cnt, batch in enumerate(batches(reads)):
+        if is_gzip:
+            with tempfile.NamedTemporaryFile(mode="w+b", delete=False, prefix=name, dir="splitaake-temp/splitaake-input-temp", suffix=".fastq.gz") as outfile:
+                gz = gzip.GzipFile(mode="wb", fileobj=outfile)
+                [gz.write("{}{}{}{}".format(*seq)) for seq in batch]
+                tempfiles.append(outfile.name)
+        else:
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, prefix=name, dir="splitaake-temp/splitaake-input-temp", suffix=".fastq") as outfile:
+                [outfile.write("{}{}{}{}".format(*seq)) for seq in batch]
+                tempfiles.append(outfile.name)
+    return tempfiles
 
 
 def write_results_out(cur, rowid, params, dmux):
@@ -120,16 +169,30 @@ def main():
         conn, cur = db.create_db_and_new_tables(params.db.name)
     # alert user we're dropping reads
     print "[WARN] Dropping all demultiplexed reads ≤ {0} bp long".format(params.quality.drop_len)
+    #
+    # make a temporary directory for all files
+    os.makedirs("splitaake-temp")
+    os.makedirs("splitaake-temp/splitaake-input-temp")
+    os.makedirs("splitaake-temp/splitaake-output-temp")
+    os.makedirs("splitaake-temp/splitaake-output")
     # get num reads and split up work
     print "Splitting reads into work units..."
-    num_reads, work = get_work(params, args.job_size)
+    if params.parallelism.cores > 1:
+        p = Pool(2)
+        tempfiles = p.map(split, [params.reads.r1, params.reads.r2])
+    else:
+        tempfiles = map(split, [params.reads.r1, params.reads.r2])
+    # re-pair split R1 with R2 mates
+    work = zip(tempfiles[0], tempfiles[1])
+    print "There are {} batches of reads".format(len(work))
+    #num_reads, work = get_work(params, args.job_size)
+    # counting reads
+    num_reads = get_sequence_count(params.reads.r1, 'fastq')
     print "There are {:,d} reads".format(num_reads)
     # give some indication of progress for longer runs
-    if num_reads > 999:
-        sys.stdout.write('Running...\n')
+    #if num_reads > 999:
+    #    sys.stdout.write('Running...\n')
     #pdb.set_trace()
-    #r1out = open('r1-reads.fasta', 'w', 1)
-    #r2out = open('r2-reads.fasta', 'w', 1)
     # MULTICORE
     if params.parallelism.cores > 1:
         jobs = Queue()
@@ -140,32 +203,30 @@ def main():
         print "Adding jobs to work queue..."
         for unit in work:
             jobs.put(unit)
-        print "There are {} jobs...".format(num_reads / args.job_size)
-        # setup the processes for the jobs
-        print "Starting {} workers...".format(params.parallelism.cores)
-        # start the worker processes
+
         [Process(target=multiproc, args=(jobs, results, params)).start()
             for i in xrange(params.parallelism.cores)]
         # we're putting single results on the results Queue so
         # that the db can (in theory) consume them at
         # a rather consistent rate rather than in spurts
-        #for unit in xrange(num_reads):
+        # make sure we put None at end of Queue
+        # in an amount equiv. to num_procs
         count = 0
         for unit in xrange(num_reads):
             dmux = results.get()
             rowid = db.insert_record_to_db(cur, dmux)
             write_results_out(cur, rowid, params, dmux)
             results.task_done()
-            progress(rowid, 10000, 100000)
+            #progress(rowid, 10000, 100000)
             # delete obj
-            del dmux
+            #del dmux
             count += 1
-        # make sure we put None at end of Queue
-        # in an amount equiv. to num_procs
+        print "joining results"
         for unit in xrange(params.parallelism.cores):
             jobs.put(None)
         # join the results, so that they can finish
         results.join()
+        print "closing queues"
         # close up our queues
         jobs.close()
         results.close()
@@ -181,6 +242,8 @@ def main():
             rowid = db.insert_record_to_db(cur, dmux)
             write_results_out(cur, rowid, params, dmux)
             progress(rowid, 10000, 100000)
+            # delete obj
+            del dmux
             count += 1
     params.storage.close()
     conn.commit()
