@@ -158,7 +158,7 @@ def main():
     # make a temporary directory for all files
     os.makedirs("splitaake-temp")
     # get num reads and split up work
-    print "Splitting reads into work units..."
+    print "[INFO] Splitting reads into work units..."
     if params.parallelism.cores > 1:
         # use static two processors to run
         p = Pool(2)
@@ -174,7 +174,7 @@ def main():
         # We're stacking groups of jobs on the work
         # Queue, conceivably to save the overhead of
         # placing them on there one-by-one.
-        print "[Info] Adding {} jobs to work queue...".format(len(work))
+        print "[INFO] Adding {} jobs to work queue...".format(len(work))
         for unit in work:
             jobs.put(unit)
 
