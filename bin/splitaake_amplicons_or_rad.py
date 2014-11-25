@@ -46,8 +46,11 @@ def get_args():
 
 
 def singleproc(sequences, results, params, interval=1000, big_interval=10000):
+    print sequences
     for pair in sequences:
-        for i, j in itertools.izip(FastqReader(pair[0]), FastqReader(pair[1])):
+        r1f = FastqReader(pair[0])
+        r2f = FastqReader(pair[1])
+        for i, j in itertools.izip(r1f, r2f):
             pair = (i,j)
             r1, r2, header = split_and_check_reads(pair)
             # create a Demux metadata object to hold ID information
@@ -81,9 +84,8 @@ def multiproc(jobs, results, params):
     while True:
         job = jobs.get()
         if job is None:
-            jobs.task_done()
             break
-        singleproc(job, results, params)
+        singleproc([job], results, params)
 
 '''
 def get_work(params, job_size=10000):
@@ -134,10 +136,12 @@ def write(reads, name, is_gzip=True):
     tempfiles = []
     for cnt, batch in enumerate(batches(reads)):
         if is_gzip:
-            with tempfile.NamedTemporaryFile(mode="w+b", delete=False, prefix=name, dir="splitaake-temp/splitaake-input-temp", suffix=".fastq.gz") as outfile:
-                gz = gzip.GzipFile(mode="wb", fileobj=outfile)
-                [gz.write("{}{}{}{}".format(*seq)) for seq in batch]
-                tempfiles.append(outfile.name)
+            outfile = tempfile.NamedTemporaryFile(mode="w+b", delete=False, prefix=name, dir="splitaake-temp/splitaake-input-temp", suffix=".fastq.gz")
+            gz = gzip.GzipFile(mode="wb", fileobj=outfile)
+            [gz.write("{}{}{}{}".format(*seq)) for seq in batch]
+            gz.close()
+            outfile.close()
+            tempfiles.append(outfile.name)
         else:
             with tempfile.NamedTemporaryFile(mode="w", delete=False, prefix=name, dir="splitaake-temp/splitaake-input-temp", suffix=".fastq") as outfile:
                 [outfile.write("{}{}{}{}".format(*seq)) for seq in batch]
@@ -169,7 +173,9 @@ def main():
         conn, cur = db.create_db_and_new_tables(params.db.name)
     # alert user we're dropping reads
     print "[WARN] Dropping all demultiplexed reads ≤ {0} bp long".format(params.quality.drop_len)
-    #
+    # counting reads
+    num_reads = get_sequence_count(params.reads.r1, 'fastq')
+    print "There are {:,d} reads".format(num_reads)
     # make a temporary directory for all files
     os.makedirs("splitaake-temp")
     os.makedirs("splitaake-temp/splitaake-input-temp")
@@ -186,9 +192,6 @@ def main():
     work = zip(tempfiles[0], tempfiles[1])
     print "There are {} batches of reads".format(len(work))
     #num_reads, work = get_work(params, args.job_size)
-    # counting reads
-    num_reads = get_sequence_count(params.reads.r1, 'fastq')
-    print "There are {:,d} reads".format(num_reads)
     # give some indication of progress for longer runs
     #if num_reads > 999:
     #    sys.stdout.write('Running...\n')
